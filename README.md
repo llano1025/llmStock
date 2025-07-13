@@ -2,9 +2,18 @@
 
 A comprehensive stock analysis system powered by Large Language Models (LLMs) that combines technical analysis, sentiment analysis, and machine learning predictions with performance tracking and reflection capabilities.
 
+## 🆕 What's New
+
+- **Enhanced Provider Selection**: Command-line provider switching with `--provider` option
+- **Updated Gemini API**: Now uses latest `google-genai` SDK with `gemini-2.5-flash` model
+- **Auto-Detection**: Intelligent provider selection based on available API keys
+- **Improved CLI**: Better help system with `--list-providers` and `--help` options
+- **Robust Fallbacks**: Automatic fallback to Ollama if selected provider fails
+
 ## Features
 
-- 🤖 **Multi-LLM Support**: Ollama, LM Studio, Google Gemini, and DeepSeek
+- 🤖 **Multi-LLM Support**: Ollama, LM Studio, Google Gemini (2.5-flash), and DeepSeek with auto-detection
+- 🔄 **Provider Selection**: Command-line provider switching with automatic fallback
 - 📊 **Advanced Technical Analysis**: 20+ indicators, pattern detection, multi-timeframe analysis
 - 📰 **News Sentiment Analysis**: Yahoo Finance news with relevance filtering
 - 📈 **Performance Tracking**: SQLite-based prediction tracking with outcome evaluation
@@ -27,9 +36,13 @@ pip install -r requirements.txt
 
 ### 2. Configuration
 
-Copy the example configuration and customize it:
+Create your configuration file:
 
 ```bash
+# The system will create a template if .env doesn't exist
+python main.py  # Creates .env.template with all options
+
+# Or copy the example if available
 cp .env.example .env
 ```
 
@@ -49,7 +62,7 @@ DEFAULT_MODEL=phi4
 
 # Option 2: Google Gemini (Cloud)
 GEMINI_API_KEY=your-api-key
-GEMINI_MODEL=gemini-pro
+GEMINI_MODEL=gemini-2.5-flash
 
 # Option 3: DeepSeek (Cloud)
 DEEPSEEK_API_KEY=your-api-key
@@ -69,16 +82,41 @@ python main.py
 python main.py --provider gemini
 python main.py --provider ollama
 python main.py --provider deepseek
+python main.py --provider lmstudio
 
 # Generate weekly reflection reports
 python main.py --mode reflect --provider gemini
 
 # Test prediction tracking system
-python main.py --mode test
+python main.py --mode test --provider auto
 
-# List available providers
+# List available providers and configuration help
 python main.py --list-providers
+
+# Show detailed help
+python main.py --help
 ```
+
+## LLM Provider System
+
+The system supports multiple LLM providers with automatic detection and fallback capabilities. Choose the provider that best fits your needs:
+
+- **Local Providers**: Ollama, LM Studio (no API costs, requires local setup)
+- **Cloud Providers**: Google Gemini, DeepSeek (API costs, no local setup)
+
+### Auto-Detection Logic
+
+When using `--provider auto` (default), the system automatically selects the best available provider:
+
+1. **Gemini**: If `GEMINI_API_KEY` is configured
+2. **DeepSeek**: If `DEEPSEEK_API_KEY` is configured  
+3. **Ollama**: Default fallback (assumes local Ollama installation)
+
+### Error Handling
+
+- If the selected provider fails to initialize, the system automatically falls back to Ollama
+- Clear error messages guide you to fix configuration issues
+- All provider failures are logged for debugging
 
 ## LLM Provider Setup
 
@@ -92,6 +130,7 @@ python main.py --list-providers
 
 1. Get API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 2. Set `GEMINI_API_KEY=your-key` in `.env`
+3. Uses latest `gemini-2.5-flash` model with optimized thinking configuration
 
 ### Option 3: DeepSeek (Cloud)
 
@@ -208,6 +247,18 @@ llm_feedback: ticker, analysis_date, performance_summary,
 
 ## Command Line Interface
 
+### Help and Discovery
+
+```bash
+# Show detailed help with all options
+python main.py --help
+
+# List all available providers with setup instructions
+python main.py --list-providers
+```
+
+### Basic Usage
+
 ```bash
 # Run stock analysis with performance tracking
 python main.py --mode analyze [--provider PROVIDER]
@@ -218,22 +269,40 @@ python main.py --mode reflect [--provider PROVIDER]
 # Test prediction tracking system with sample data
 python main.py --mode test [--provider PROVIDER]
 
-# List available LLM providers
+# Show available providers with configuration examples
 python main.py --list-providers
 
-# Show help
+# Show detailed help
 python main.py --help
 ```
 
 ### Provider Selection
 
-- **`--provider auto`** (default): Auto-detect based on configuration
-- **`--provider ollama`**: Use local Ollama server
-- **`--provider lmstudio`**: Use local LM Studio server  
-- **`--provider gemini`**: Use Google Gemini API
-- **`--provider deepseek`**: Use DeepSeek API
+| Provider | Description | Requirements |
+|----------|-------------|-------------|
+| `auto` | Auto-detect based on configuration (default) | At least one provider configured |
+| `ollama` | Local Ollama server | Ollama running on localhost:11434 |
+| `lmstudio` | Local LM Studio server | LM Studio running on localhost:1234 |
+| `gemini` | Google Gemini API (gemini-2.5-flash) | Valid GEMINI_API_KEY |
+| `deepseek` | DeepSeek API | Valid DEEPSEEK_API_KEY |
 
-Auto-detection priority: Gemini API key → DeepSeek API key → Ollama (default)
+**Auto-detection priority**: Gemini API key → DeepSeek API key → Ollama (default)
+
+### Advanced Examples
+
+```bash
+# Run analysis with specific provider
+python main.py --mode analyze --provider gemini
+
+# Generate reflection with cloud provider
+python main.py --mode reflect --provider deepseek
+
+# Test with local Ollama
+python main.py --mode test --provider ollama
+
+# Auto-detect provider (checks API keys, falls back to Ollama)
+python main.py --mode analyze --provider auto
+```
 
 ## Output
 
@@ -258,20 +327,37 @@ Auto-detection priority: Gemini API key → DeepSeek API key → Ollama (default
 - requests, beautifulsoup4 (news scraping)
 
 ### LLM Providers (Optional)
-- `google-genai` (Gemini)
-- `openai` (DeepSeek)
+- `google-genai>=0.3.0` (Gemini with new SDK)
+- `openai>=1.0.0` (DeepSeek - OpenAI compatible)
 
 ### Note on Compatibility
-The system requires `numpy<2.0` due to pandas-ta compatibility. Future versions will support numpy 2.x when pandas-ta is updated.
+- **NumPy**: Requires `numpy<2.0` due to pandas-ta compatibility
+- **Gemini API**: Updated to use new `google-genai` SDK with improved performance
+- **Python**: Requires Python 3.8+ for full compatibility
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Import Errors**: Ensure all dependencies are installed via `pip install -r requirements.txt`
-2. **Email Issues**: Verify Gmail app password and 2FA setup
-3. **LLM Errors**: Check API keys and model availability
-4. **News Scraping**: Some tickers may have limited news availability
+1. **Import Errors**: 
+   - Run `pip install -r requirements.txt` to install all dependencies
+   - Check that `pandas_ta` and `google-genai` are properly installed
+
+2. **Provider Issues**:
+   - **Gemini**: Verify API key at [Google AI Studio](https://aistudio.google.com/app/apikey)
+   - **DeepSeek**: Check API key at [DeepSeek Platform](https://platform.deepseek.com/api_keys)
+   - **Ollama**: Ensure Ollama is running (`ollama serve`) and model is pulled
+   - **LM Studio**: Verify server is running with a model loaded
+
+3. **Email Issues**: 
+   - Use Gmail app passwords (not regular password)
+   - Enable 2FA and generate app password
+
+4. **Auto-detection**: 
+   - System falls back to Ollama if no API keys are configured
+   - Check `.env` file for proper API key configuration
+
+5. **News Scraping**: Some tickers may have limited news availability
 
 ### Logs
 - Application logs: `stock_analyzer.log`
@@ -288,6 +374,14 @@ The system requires `numpy<2.0` due to pandas-ta compatibility. Future versions 
 ## License
 
 [Add your license information here]
+
+## Getting Started Checklist
+
+1. ✅ Install dependencies: `pip install -r requirements.txt`
+2. ✅ Configure at least one LLM provider (see setup sections above)
+3. ✅ Set up email credentials in `.env` file
+4. ✅ Test provider selection: `python main.py --list-providers`
+5. ✅ Run your first analysis: `python main.py --provider auto`
 
 ## Disclaimer
 

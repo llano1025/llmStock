@@ -217,8 +217,6 @@ def main(provider_type='auto'):
         logger.critical(f"Critical error in main process: {e}")
 
 
-
-
 # Main execution
 if __name__ == "__main__":
     # Parse command line arguments (special cases already handled above)
