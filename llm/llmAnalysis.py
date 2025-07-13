@@ -59,7 +59,7 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
 # Core application imports - these are required dependencies
-from data.data_loader import fetch_most_active_stocks, fetch_stock_data, get_earning_data
+from data.data_loader import fetch_stock_data, get_earning_data
 from utils.utils_report import EmailSender
 from utils.utils_path import (
     get_project_root as get_root_path, 
@@ -67,7 +67,6 @@ from utils.utils_path import (
     get_plot_path, 
     ensure_directories
 )
-from data import data_loader as dl
 
 # Configure logging
 logging.basicConfig(
@@ -630,7 +629,7 @@ class AdvancedTechnicalAnalysis:
         df['Ichimoku_SpanB'] = ichimoku.ichimoku_b()
         
         # Fill missing values
-        df = df.fillna(method='bfill').fillna(method='ffill')
+        df = df.bfill().ffill()
         
         return df
     
@@ -703,8 +702,8 @@ class AdvancedTechnicalAnalysis:
             }
             
             # Get market indices - ensure timezone consistency
-            spy_data = yf.download('SPY', period='3mo', progress=False)
-            vix_data = yf.download('^VIX', period='3mo', progress=False)
+            spy_data = yf.download('SPY', period='3mo', progress=False, auto_adjust=True)
+            vix_data = yf.download('^VIX', period='3mo', progress=False, auto_adjust=True)
             
             # Extract Close prices as Series
             spy = spy_data['Close'] if isinstance(spy_data['Close'], pd.Series) else spy_data['Close'].squeeze()
@@ -712,7 +711,7 @@ class AdvancedTechnicalAnalysis:
             
             # Get sector ETF if applicable
             sector_etf = sector_map.get(ticker, 'SPY')
-            sector_data = yf.download(sector_etf, period='3mo', progress=False)
+            sector_data = yf.download(sector_etf, period='3mo', progress=False, auto_adjust=True)
             sector = sector_data['Close'] if isinstance(sector_data['Close'], pd.Series) else sector_data['Close'].squeeze()
             
             # Remove timezone info if present to avoid tz-aware/naive conflicts
@@ -1068,12 +1067,11 @@ class StockAnalyzer:
             df = stock.history(period=period)
 
             # Return advanced data
-            adv_df = dl.fetch_stock_data(ticker, 1260)
-
-            # Return earning data
-            earning_table, earning_next, earning_delta = dl.get_earning_data(ticker)
-
+            adv_df = fetch_stock_data(ticker, 1260)
+            earning_table, earning_next, earning_delta = get_earning_data(ticker)
+            
             return df, adv_df, earning_delta
+        
         except Exception as e:
             logger.error(f"Error fetching stock data for {ticker}: {e}")
             return None, None, 365  # Default earnings delta

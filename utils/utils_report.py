@@ -9,6 +9,7 @@ from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+from markdown_it import MarkdownIt
 
 class EmailSender:
     def __init__(self, smtp_server, smtp_port, sender_email, sender_password):
@@ -19,6 +20,7 @@ class EmailSender:
         self.smtp_port = smtp_port
         self.sender_email = sender_email
         self.sender_password = sender_password
+        self.md = MarkdownIt('commonmark', {'breaks': True, 'html': True})
 
     def create_html_report(self, analysis_results):
         """
@@ -88,6 +90,52 @@ class EmailSender:
                     background-color: #e9ecef;
                     text-decoration: none;
                 }
+                /* Markdown content styles */
+                .analysis-text h1, .analysis-text h2, .analysis-text h3, .analysis-text h4 {
+                    color: #0366d6;
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                }
+                .analysis-text h1 { font-size: 1.8em; }
+                .analysis-text h2 { font-size: 1.5em; }
+                .analysis-text h3 { font-size: 1.3em; }
+                .analysis-text h4 { font-size: 1.1em; }
+                .analysis-text p {
+                    margin-bottom: 10px;
+                    line-height: 1.6;
+                }
+                .analysis-text ul, .analysis-text ol {
+                    margin-left: 20px;
+                    margin-bottom: 10px;
+                }
+                .analysis-text li {
+                    margin-bottom: 5px;
+                    line-height: 1.5;
+                }
+                .analysis-text strong {
+                    font-weight: bold;
+                    color: #333;
+                }
+                .analysis-text em {
+                    font-style: italic;
+                }
+                .analysis-text code {
+                    background-color: #f6f8fa;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    font-family: monospace;
+                }
+                .analysis-text blockquote {
+                    border-left: 4px solid #dfe2e5;
+                    padding-left: 16px;
+                    margin: 16px 0;
+                    color: #6a737d;
+                }
+                .analysis-text hr {
+                    border: none;
+                    border-top: 1px solid #e1e4e8;
+                    margin: 20px 0;
+                }
             </style>
         </head>
         <body>
@@ -152,7 +200,7 @@ class EmailSender:
         for result in analysis_results:
             change_class = 'positive' if result['change_pct'] > 0 else 'negative'
             change_symbol = '+' if result['change_pct'] > 0 else ''
-            analysis_html = result['summary'].replace('\n', '<br>')
+            analysis_html = self.md.render(result['summary'])
             symbol_id = f"analysis-{result['symbol']}"  # Same ID as used in the summary table
 
             html += f"""

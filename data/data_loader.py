@@ -74,7 +74,7 @@ def get_stock_data(stock_symbol, start_date, end_date):
         tuple: (DataFrame with stock data, skip flag)
     """
     # Get the earliest available date for the stock
-    hist_max = yf.download(stock_symbol, period='max')
+    hist_max = yf.download(stock_symbol, period='max',auto_adjust=True)
     columns_stripped = [col[0] for col in hist_max.columns]
     hist_max.columns = columns_stripped
     max_date = hist_max.index[0]
@@ -86,17 +86,17 @@ def get_stock_data(stock_symbol, start_date, end_date):
     # Download data based on date conditions
     if max_date < start_date:
         # Case 1: Requested start date is after stock's first available date
-        hist = yf.download(stock_symbol, start=start_date, end=end_date)
+        hist = yf.download(stock_symbol, start=start_date, end=end_date, auto_adjust=True)
         columns_stripped = [col[0] if isinstance(col, (list, tuple)) else col for col in hist.columns]
         hist.columns = columns_stripped
-        hist_ta = yf.download(stock_symbol, start=start_date - timedelta(days=1), end=end_date - timedelta(days=1))
+        hist_ta = yf.download(stock_symbol, start=start_date - timedelta(days=1), end=end_date - timedelta(days=1), auto_adjust=True)
         columns_stripped = [col[0] if isinstance(col, (list, tuple)) else col for col in hist_ta.columns]
         hist_ta.columns = columns_stripped
         
         # Get market index data
-        sp500_data = yf.download("^GSPC", start=start_date, end=end_date)
+        sp500_data = yf.download("^GSPC", start=start_date, end=end_date, auto_adjust=True)
         sp500_data = sp500_data.rename(columns={'Close': 'S&P500 Close'})
-        nasdaq_data = yf.download("^IXIC", start=start_date, end=end_date)
+        nasdaq_data = yf.download("^IXIC", start=start_date, end=end_date, auto_adjust=True)
         nasdaq_data = nasdaq_data.rename(columns={'Close': 'NASDAQ Close'})
         hist = fix_yfinance_columns(hist)
         hist = pd.concat([hist, sp500_data['S&P500 Close'], nasdaq_data['NASDAQ Close']], axis=1)
