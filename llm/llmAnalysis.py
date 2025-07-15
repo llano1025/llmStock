@@ -1759,7 +1759,7 @@ class StockAnalyzer:
     @staticmethod
     def extract_recommendation(analysis_text: str) -> Tuple[str, str]:
         """
-        Extract recommendation and confidence level from analysis text with improved pattern matching
+        Extract recommendation and confidence level from analysis text with robust pattern matching
         
         Args:
             analysis_text: The full analysis text containing the recommendation
@@ -1771,30 +1771,46 @@ class StockAnalyzer:
         action = "HOLD"
         confidence = "LOW"
         
-        # Try multiple regex patterns to match different formats
+        # More robust patterns that capture any confidence level
         patterns = [
-            # Format: RECOMMENDATION: ACTION (Confidence: LEVEL)
-            r"RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*(HIGH|MEDIUM|LOW)\)",
+            # Format: RECOMMENDATION: ACTION (Confidence: LEVEL) - captures any confidence
+            r"RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
             
-            # Format with lowercase and flexible spacing
-            r"recommendation:\s*(buy|sell|hold)\s*\(confidence:\s*(high|medium|low)\)",
+            # Format with lowercase and flexible spacing - captures any confidence  
+            r"recommendation:\s*(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
             
-            # Format with possible line breaks
-            r"recommendation:\s*(buy|sell|hold)[\s\n]*\(confidence:[\s\n]*(high|medium|low)\)",
+            # Format with possible line breaks - captures any confidence
+            r"recommendation:\s*(buy|sell|hold)[\s\n]*\(confidence:[\s\n]*([a-z-]+)\)",
             
-            # Format without 'recommendation:' prefix
-            r"(buy|sell|hold)\s*\(confidence:\s*(high|medium|low)\)",
+            # Format without 'recommendation:' prefix - captures any confidence
+            r"(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
             
-            # Format with different bracket styles
-            r"recommendation:\s*(buy|sell|hold)\s*[\(\[\{]\s*confidence:\s*(high|medium|low)\s*[\)\]\}]"
+            # Format with different bracket styles - captures any confidence
+            r"recommendation:\s*(buy|sell|hold)\s*[\(\[\{]\s*confidence:\s*([a-z-]+)\s*[\)\]\}]",
+            
+            # Fallback: look for FINAL RECOMMENDATION pattern
+            r"FINAL\s+RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
         ]
         
+        # Find all matches and take the last one (final recommendation)
         for pattern in patterns:
-            match = re.search(pattern, analysis_text, re.IGNORECASE)
-            if match:
-                action = match.group(1).upper()
-                confidence = match.group(2).upper()
+            matches = list(re.finditer(pattern, analysis_text, re.IGNORECASE))
+            if matches:
+                last_match = matches[-1]
+                action = last_match.group(1).upper()
+                confidence = last_match.group(2).upper().replace('-', '_')  # Convert hyphens to underscores
                 break
+        
+        # Additional cleanup for confidence levels
+        confidence_mapping = {
+            'MEDIUM_HIGH': 'MEDIUM-HIGH',
+            'MEDIUM_LOW': 'MEDIUM-LOW',
+            'HIGH': 'HIGH',
+            'MEDIUM': 'MEDIUM', 
+            'LOW': 'LOW'
+        }
+        
+        confidence = confidence_mapping.get(confidence, confidence)
         
         return action, confidence
 
