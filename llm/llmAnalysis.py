@@ -1032,7 +1032,23 @@ Include specific reasoning for the confidence level based on:
 - Signal confluence
 - Market regime alignment
 - Risk/reward ratio
-- Time frame convergence"""
+- Time frame convergence
+
+STRUCTURED OUTPUT:
+After your analysis, provide the following JSON format for accurate data capture:
+
+```json
+{{
+  "recommendation": "[BUY/SELL/HOLD]",
+  "confidence": "[HIGH/MEDIUM/LOW]",
+  "entry_price": [current_price_number],
+  "target_price": [price_target_number],
+  "stop_loss": [stop_loss_price_number],
+  "predicted_timeframe": "[short-term/medium-term/long-term]"
+}}
+```
+
+Ensure all numeric values are provided as numbers, not strings. Use null for missing values."""
     
     return prompt
 
@@ -1757,49 +1773,99 @@ class StockAnalyzer:
             return fig
     
     @staticmethod
-    def extract_recommendation(analysis_text: str) -> Tuple[str, str]:
+    def parse_llm_json_response(analysis_text: str) -> Dict[str, Any]:
         """
-        Extract recommendation and confidence level from analysis text with robust pattern matching
+        Parse JSON response from LLM analysis
+        
+        Args:
+            analysis_text: The full analysis text containing JSON
+            
+        Returns:
+            Dict containing parsed JSON data or empty dict if parsing fails
+        """
+        import json
+        import re
+        
+        try:
+            # Look for JSON between ```json and ``` markers
+            json_pattern = r'```json\s*(\{[^`]*\})\s*```'
+            json_match = re.search(json_pattern, analysis_text, re.DOTALL)
+            
+            if json_match:
+                json_str = json_match.group(1).strip()
+                return json.loads(json_str)
+            
+            # Fallback: look for JSON-like structure without code blocks
+            json_pattern_fallback = r'\{[^}]*"recommendation"[^}]*\}'
+            json_match_fallback = re.search(json_pattern_fallback, analysis_text, re.DOTALL)
+            
+            if json_match_fallback:
+                json_str = json_match_fallback.group(0).strip()
+                return json.loads(json_str)
+                
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning(f"Failed to parse JSON from LLM response: {e}")
+            
+        return {}
+    
+    @staticmethod
+    def extract_recommendation(analysis_text: str) -> Tuple[str, str, Optional[float], Optional[float], Optional[str]]:
+        """
+        Extract recommendation and all required fields from analysis text using JSON parsing with regex fallback
         
         Args:
             analysis_text: The full analysis text containing the recommendation
             
         Returns:
-            Tuple of (action, confidence) - Both uppercase strings
+            Tuple of (action, confidence, target_price, stop_loss, predicted_timeframe)
         """
         # Default values
         action = "HOLD"
         confidence = "LOW"
+        target_price = None
+        stop_loss = None
+        predicted_timeframe = "short-term"
         
-        # More robust patterns that capture any confidence level
-        patterns = [
-            # Format: RECOMMENDATION: ACTION (Confidence: LEVEL) - captures any confidence
-            r"RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
-            
-            # Format with lowercase and flexible spacing - captures any confidence  
-            r"recommendation:\s*(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
-            
-            # Format with possible line breaks - captures any confidence
-            r"recommendation:\s*(buy|sell|hold)[\s\n]*\(confidence:[\s\n]*([a-z-]+)\)",
-            
-            # Format without 'recommendation:' prefix - captures any confidence
-            r"(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
-            
-            # Format with different bracket styles - captures any confidence
-            r"recommendation:\s*(buy|sell|hold)\s*[\(\[\{]\s*confidence:\s*([a-z-]+)\s*[\)\]\}]",
-            
-            # Fallback: look for FINAL RECOMMENDATION pattern
-            r"FINAL\s+RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
-        ]
+        # First try to parse JSON
+        json_data = StockAnalyzer.parse_llm_json_response(analysis_text)
         
-        # Find all matches and take the last one (final recommendation)
-        for pattern in patterns:
-            matches = list(re.finditer(pattern, analysis_text, re.IGNORECASE))
-            if matches:
-                last_match = matches[-1]
-                action = last_match.group(1).upper()
-                confidence = last_match.group(2).upper().replace('-', '_')  # Convert hyphens to underscores
-                break
+        if json_data:
+            # Extract values from JSON
+            action = json_data.get('recommendation', action).upper()
+            confidence = json_data.get('confidence', confidence).upper()
+            target_price = json_data.get('target_price')
+            stop_loss = json_data.get('stop_loss')
+            predicted_timeframe = json_data.get('predicted_timeframe', predicted_timeframe)
+        else:
+            # Fallback to regex patterns for backward compatibility
+            patterns = [
+                # Format: RECOMMENDATION: ACTION (Confidence: LEVEL) - captures any confidence
+                r"RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
+                
+                # Format with lowercase and flexible spacing - captures any confidence  
+                r"recommendation:\s*(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
+                
+                # Format with possible line breaks - captures any confidence
+                r"recommendation:\s*(buy|sell|hold)[\s\n]*\(confidence:[\s\n]*([a-z-]+)\)",
+                
+                # Format without 'recommendation:' prefix - captures any confidence
+                r"(buy|sell|hold)\s*\(confidence:\s*([a-z-]+)\)",
+                
+                # Format with different bracket styles - captures any confidence
+                r"recommendation:\s*(buy|sell|hold)\s*[\(\[\{]\s*confidence:\s*([a-z-]+)\s*[\)\]\}]",
+                
+                # Fallback: look for FINAL RECOMMENDATION pattern
+                r"FINAL\s+RECOMMENDATION:\s*(BUY|SELL|HOLD)\s*\(Confidence:\s*([A-Z-]+)\)",
+            ]
+            
+            # Find all matches and take the last one (final recommendation)
+            for pattern in patterns:
+                matches = list(re.finditer(pattern, analysis_text, re.IGNORECASE))
+                if matches:
+                    last_match = matches[-1]
+                    action = last_match.group(1).upper()
+                    confidence = last_match.group(2).upper().replace('-', '_')  # Convert hyphens to underscores
+                    break
         
         # Additional cleanup for confidence levels
         confidence_mapping = {
@@ -1812,7 +1878,7 @@ class StockAnalyzer:
         
         confidence = confidence_mapping.get(confidence, confidence)
         
-        return action, confidence
+        return action, confidence, target_price, stop_loss, predicted_timeframe
 
     def get_market_sentiment(self) -> Tuple[Optional[Dict[str, Dict[str, Any]]], Optional[str], Optional[str]]:
         """
@@ -1916,7 +1982,7 @@ class StockAnalyzer:
             
             # Get analysis from capable LLM
             analysis = self.llm.generate(prompt)
-            action, confidence = self.extract_recommendation(analysis)
+            action, confidence, target_price, stop_loss, predicted_timeframe = self.extract_recommendation(analysis)
             
             return analysis, action, confidence
             
@@ -1968,7 +2034,7 @@ class EnhancedStockAnalyzer(StockAnalyzer):
         
         # Get analysis
         analysis = self.llm.generate(enhanced_prompt)
-        action, confidence = self.extract_recommendation(analysis)
+        action, confidence, target_price, stop_loss, predicted_timeframe = self.extract_recommendation(analysis)
         
         # Record prediction
         latest = df.iloc[-1]
@@ -1978,9 +2044,9 @@ class EnhancedStockAnalyzer(StockAnalyzer):
             recommendation=action,
             confidence=confidence,
             entry_price=latest['Close'],
-            target_price=None,  # Extract from analysis if available
-            stop_loss=None,     # Extract from analysis if available
-            predicted_timeframe='short-term',  # Extract from analysis
+            target_price=target_price,
+            stop_loss=stop_loss,
+            predicted_timeframe=predicted_timeframe,
             technical_indicators={
                 'RSI': latest['RSI'],
                 'MACD': latest['MACD'],

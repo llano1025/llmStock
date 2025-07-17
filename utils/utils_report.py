@@ -22,9 +22,13 @@ class EmailSender:
         self.sender_password = sender_password
         self.md = MarkdownIt('commonmark', {'breaks': True, 'html': True})
 
-    def create_html_report(self, analysis_results):
+    def create_html_report(self, analysis_results, include_full_analysis=True):
         """
-        Create detailed HTML report with full analysis
+        Create detailed HTML report with option to include or exclude full analysis
+        
+        Args:
+            analysis_results: List of analysis results
+            include_full_analysis: Boolean to include full LLM analysis text (default: True)
         """
         html = """
         <html>
@@ -200,8 +204,32 @@ class EmailSender:
         for result in analysis_results:
             change_class = 'positive' if result['change_pct'] > 0 else 'negative'
             change_symbol = '+' if result['change_pct'] > 0 else ''
-            analysis_html = self.md.render(result['summary'])
             symbol_id = f"analysis-{result['symbol']}"  # Same ID as used in the summary table
+
+            # Create condensed summary or full analysis based on flag
+            if include_full_analysis:
+                analysis_html = self.md.render(result['summary'])
+                analysis_section = f"""
+                    <div>
+                        <h4>Full Technical Analysis:</h4>
+                        <div class="analysis-text">
+                            {analysis_html}
+                        </div>
+                    </div>
+                """
+            else:
+                # Create condensed summary with key information only
+                analysis_section = f"""
+                    <div>
+                        <h4>Key Analysis Points:</h4>
+                        <div class="analysis-text">
+                            <p><strong>Action:</strong> {result['recommendation']} with {result['confidence']} confidence</p>
+                            <p><strong>Current Price:</strong> ${result['price']:.2f}</p>
+                            <p><strong>Technical Status:</strong> RSI: {result['rsi']:.1f}, MACD: {result['macd_signal']}</p>
+                            <p><em>Full technical analysis charts are attached to this email.</em></p>
+                        </div>
+                    </div>
+                """
 
             html += f"""
                 <div id="{symbol_id}" class="stock-analysis">
@@ -228,12 +256,7 @@ class EmailSender:
                             </span>
                         </div>
                     </div>
-                    <div>
-                        <h4>Technical Analysis:</h4>
-                        <div class="analysis-text">
-                            {analysis_html}
-                        </div>
-                    </div>
+                    {analysis_section}
                     <a href="#top" class="jump-to-top">↑ Jump to Top</a>
                 </div>
             """
@@ -245,7 +268,7 @@ class EmailSender:
         """
         return html
 
-    def send_report(self, recipient_emails, subject, analysis_results, plot_files):
+    def send_report(self, recipient_emails, subject, analysis_results, plot_files, include_full_analysis=True):
         """
         Send email report to multiple recipients
         Args:
@@ -253,6 +276,7 @@ class EmailSender:
             subject: str - email subject
             analysis_results: list of dict - analysis results
             plot_files: list - paths to plot files
+            include_full_analysis: bool - whether to include full LLM analysis text (default: True)
         """
         # Convert single email to list for consistent handling
         if isinstance(recipient_emails, str):
@@ -264,7 +288,7 @@ class EmailSender:
         msg['To'] = ', '.join(recipient_emails)  # Join multiple emails with comma
 
         # Create HTML content
-        html_content = self.create_html_report(analysis_results)
+        html_content = self.create_html_report(analysis_results, include_full_analysis)
         msg.attach(MIMEText(html_content, 'html'))
 
         # Attach plots
