@@ -242,22 +242,27 @@ class PerformanceEvaluator:
         
         expected_days = timeframe_days.get(prediction['predicted_timeframe'], 30)
         
-        # Check if we've reached the timeframe
-        if days_held >= expected_days:
-            should_close = True
-            
-        # Check stop loss
+        # Check stop loss first (highest priority)
         if prediction['stop_loss'] and current_price <= prediction['stop_loss']:
             should_close = True
             outcome = 'FAILURE'
             
-        # Check target price
-        if prediction['target_price'] and current_price >= prediction['target_price']:
+        # Check target price (second priority)
+        elif prediction['target_price'] and current_price >= prediction['target_price']:
             should_close = True
             outcome = 'SUCCESS'
             
+        # Check if we've reached the timeframe (third priority)
+        elif days_held >= expected_days:
+            should_close = True
+            # outcome remains 'OPEN' - will be set based on performance below
+            
         if not should_close and days_held < 3:
             return None  # Too early to evaluate
+            
+        # If we should close but haven't yet, ensure we process it
+        if should_close:
+            pass  # Continue processing to close the prediction
             
         # Calculate returns
         actual_return = (current_price - prediction['entry_price']) / prediction['entry_price'] * 100
@@ -283,6 +288,11 @@ class PerformanceEvaluator:
                     outcome = 'FAILURE'
                 else:
                     outcome = 'PARTIAL'
+            else:  # HOLD recommendation
+                if abs(actual_return) < 1:
+                    outcome = 'SUCCESS'
+                else:
+                    outcome = 'PARTIAL'
                     
         # Get current market conditions
         market_condition = {
@@ -306,10 +316,15 @@ class PerformanceEvaluator:
     def _get_market_return(self, market_data: pd.DataFrame, days: int) -> float:
         """Calculate market return over the period"""
         try:
-            if len(market_data) >= days:
-                return (market_data['Close'].iloc[-1] - market_data['Close'].iloc[-days]) / market_data['Close'].iloc[-days] * 100
-        except:
-            pass
+            if len(market_data) >= days and days > 0:
+                # Ensure we don't go out of bounds
+                start_idx = min(days, len(market_data) - 1)
+                return (market_data['Close'].iloc[-1] - market_data['Close'].iloc[-start_idx]) / market_data['Close'].iloc[-start_idx] * 100
+            elif len(market_data) > 1:
+                # Use all available data if we don't have enough days
+                return (market_data['Close'].iloc[-1] - market_data['Close'].iloc[0]) / market_data['Close'].iloc[0] * 100
+        except Exception as e:
+            logger.warning(f"Error calculating market return: {e}")
         return 0
 
 
