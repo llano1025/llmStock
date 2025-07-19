@@ -108,6 +108,14 @@ class Config:
     deepseek_model: str = None
     deepseek_host: str = None
     
+    # Consistency control settings
+    consistency_mode: bool = None
+    llm_temperature: float = None
+    llm_seed: int = None
+    use_historical_context: bool = None
+    analysis_style_consistency: bool = None
+    cache_data_for_testing: bool = None
+    
     def __post_init__(self):
         """Load configuration from .env file and set defaults"""
         # Load environment variables from .env file
@@ -176,6 +184,14 @@ class Config:
         self.deepseek_model = os.getenv('DEEPSEEK_MODEL', "deepseek-chat")
         self.deepseek_host = os.getenv('DEEPSEEK_HOST', "https://api.deepseek.com")
         
+        # Consistency control settings
+        self.consistency_mode = os.getenv('CONSISTENCY_MODE', 'false').lower() == 'true'
+        self.llm_temperature = float(os.getenv('LLM_TEMPERATURE', '0.7'))
+        self.llm_seed = int(os.getenv('LLM_SEED', '42')) if os.getenv('LLM_SEED') else None
+        self.use_historical_context = os.getenv('USE_HISTORICAL_CONTEXT', 'true').lower() == 'true'
+        self.analysis_style_consistency = os.getenv('ANALYSIS_STYLE_CONSISTENCY', 'true').lower() == 'true'
+        self.cache_data_for_testing = os.getenv('CACHE_DATA_FOR_TESTING', 'false').lower() == 'true'
+        
     @classmethod
     def create_env_template(cls, file_path: Path = None):
         """Create a template .env file with all configurable variables"""
@@ -237,6 +253,31 @@ GEMINI_MODEL=gemini-pro
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_HOST=https://api.deepseek.com
+
+# Consistency Control Settings
+# ============================
+# Enable consistency mode for more predictable analysis outputs
+CONSISTENCY_MODE=false
+
+# LLM temperature setting (0.0 = deterministic, 1.0 = creative)
+# Lower values provide more consistent outputs
+LLM_TEMPERATURE=0.7
+
+# Random seed for reproducible outputs (where supported)
+# Set to a fixed number for testing consistency
+LLM_SEED=42
+
+# Enable historical context in analysis prompts
+# Uses past analysis summaries to maintain consistency
+USE_HISTORICAL_CONTEXT=true
+
+# Enable analysis style consistency
+# Maintains similar analytical approach across analyses
+ANALYSIS_STYLE_CONSISTENCY=true
+
+# Cache data for testing (development/testing only)
+# Prevents real-time data changes during consistency testing
+CACHE_DATA_FOR_TESTING=false
 """
         with open(file_path, 'w') as f:
             f.write(template)
@@ -279,9 +320,11 @@ class OllamaProvider(LLMProvider):
         if config:
             self.model_name = model_name or config.default_model
             self.host = host or config.ollama_host
+            self.config = config  # Store config for consistency settings
         else:
             self.model_name = model_name or "llama3.1"
             self.host = host or "http://localhost:11434"
+            self.config = None
             
         # Test connection on initialization
         self._test_connection()
@@ -315,13 +358,22 @@ class OllamaProvider(LLMProvider):
             Exception: If the API call fails
         """
         try:
+            request_data = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False
+            }
+            
+            # Add consistency parameters if available
+            if hasattr(self, 'config') and self.config:
+                if self.config.consistency_mode:
+                    request_data["temperature"] = self.config.llm_temperature
+                    if self.config.llm_seed is not None:
+                        request_data["seed"] = self.config.llm_seed
+            
             response = requests.post(
                 f"{self.host}/api/generate",
-                json={
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": False
-                },
+                json=request_data,
                 timeout=180  # Add timeout to avoid hanging
             )
             response.raise_for_status()
@@ -343,8 +395,10 @@ class LMStudioProvider(LLMProvider):
         """
         if config:
             self.host = host or config.lmstudio_host
+            self.config = config  # Store config for consistency settings
         else:
             self.host = host or "http://localhost:1234/v1"
+            self.config = None
             
         # Test connection on initialization
         self._test_connection()
@@ -374,15 +428,22 @@ class LMStudioProvider(LLMProvider):
             Exception: If the API call fails
         """
         try:
+            request_data = {
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }
+            
+            # Add consistency parameters if available
+            if hasattr(self, 'config') and self.config:
+                if self.config.consistency_mode:
+                    request_data["temperature"] = self.config.llm_temperature
+            
             response = requests.post(
                 f"{self.host}/completions",
-                json={
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 1000
-                },
+                json=request_data,
                 timeout=60  # Add timeout to avoid hanging
             )
             response.raise_for_status()
@@ -483,10 +544,12 @@ class DeepSeekProvider(LLMProvider):
             self.api_key = api_key or getattr(config, 'deepseek_api_key', None) or os.getenv('DEEPSEEK_API_KEY')
             self.model_name = model_name or getattr(config, 'deepseek_model', 'deepseek-chat')
             self.base_url = base_url or getattr(config, 'deepseek_host', 'https://api.deepseek.com')
+            self.config = config  # Store config for consistency settings
         else:
             self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
             self.model_name = model_name or 'deepseek-chat'
             self.base_url = base_url or 'https://api.deepseek.com'
+            self.config = None
             
         if not self.api_key:
             raise ValueError("DeepSeek API key is required. Set DEEPSEEK_API_KEY environment variable or pass api_key parameter.")
@@ -527,13 +590,22 @@ class DeepSeekProvider(LLMProvider):
             Exception: If the API call fails
         """
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=2000,
-                timeout=120
-            )
+            request_params = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "timeout": 120
+            }
+            
+            # Add consistency parameters if available
+            if hasattr(self, 'config') and self.config:
+                if self.config.consistency_mode:
+                    request_params["temperature"] = self.config.llm_temperature
+                    if self.config.llm_seed is not None:
+                        request_params["seed"] = self.config.llm_seed
+            
+            response = self.client.chat.completions.create(**request_params)
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"DeepSeek API error: {e}")
@@ -2029,8 +2101,8 @@ class EnhancedStockAnalyzer(StockAnalyzer):
             patterns, multi_tf_signals
         )
         
-        # Enhance with historical insights
-        enhanced_prompt = self.reflection_engine.get_enhanced_analysis_prompt(base_prompt, ticker)
+        # Enhance with historical insights and consistency controls
+        enhanced_prompt = self.reflection_engine.get_enhanced_analysis_prompt(base_prompt, ticker, self.config)
         
         # Get analysis
         analysis = self.llm.generate(enhanced_prompt)
@@ -2072,7 +2144,7 @@ class EnhancedStockAnalyzer(StockAnalyzer):
             try:
                 # Get current data
                 ticker = pred['ticker']
-                df = yf.Ticker(ticker).history(period='1mo')
+                df = yf.Ticker(ticker).history(period='3mo')
                 
                 if df.empty:
                     continue

@@ -1,10 +1,9 @@
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from pathlib import Path
 import pandas as pd
-import numpy as np
 import logging
 from .llm_models import PredictionRecord, PerformanceRecord
 
@@ -162,6 +161,62 @@ class PredictionTracker:
         conn.close()
         return predictions
         
+    def get_recent_analyses(self, ticker: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Get recent analysis summaries for consistency reference"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT prediction_date, recommendation, confidence, llm_analysis
+            FROM predictions 
+            WHERE ticker = ?
+            ORDER BY prediction_date DESC 
+            LIMIT ?
+        ''', (ticker, limit))
+        
+        columns = [description[0] for description in cursor.description]
+        analyses = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        conn.close()
+        return analyses
+        
+    def get_analysis_style_summary(self, ticker: str, days: int = 30) -> Dict[str, Any]:
+        """Get analysis style patterns for consistency"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT recommendation, confidence, llm_analysis, 
+                   technical_indicators, sentiment_data
+            FROM predictions 
+            WHERE ticker = ? AND prediction_date >= date('now', '-{} days')
+            ORDER BY prediction_date DESC
+        '''.format(days), (ticker,))
+        
+        columns = [description[0] for description in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        if not results:
+            return {'patterns': [], 'style_summary': ''}
+            
+        # Extract patterns
+        recommendations = [r['recommendation'] for r in results]
+        confidences = [r['confidence'] for r in results]
+        
+        style_summary = f"""
+        Recent analysis patterns for {ticker}:
+        - Most common recommendation: {max(set(recommendations), key=recommendations.count)}
+        - Most common confidence level: {max(set(confidences), key=confidences.count)}
+        - Total analyses: {len(results)}
+        """
+        
+        return {
+            'patterns': results[:3],  # Last 3 for reference
+            'style_summary': style_summary.strip()
+        }
+
     def get_performance_stats(self, ticker: Optional[str] = None, 
                             days: int = 30) -> Dict[str, Any]:
         """Get performance statistics for predictions"""
@@ -316,10 +371,14 @@ class PerformanceEvaluator:
     def _get_market_return(self, market_data: pd.DataFrame, days: int) -> float:
         """Calculate market return over the period"""
         try:
-            if len(market_data) >= days and days > 0:
-                # Ensure we don't go out of bounds
-                start_idx = min(days, len(market_data) - 1)
-                return (market_data['Close'].iloc[-1] - market_data['Close'].iloc[-start_idx]) / market_data['Close'].iloc[-start_idx] * 100
+            if len(market_data) <= 1:
+                return 0
+                
+            if days > 0 and len(market_data) > days:
+                # We have enough data for the full period
+                start_price = market_data['Close'].iloc[-days-1]  # Go back 'days' from the end
+                end_price = market_data['Close'].iloc[-1]
+                return (end_price - start_price) / start_price * 100
             elif len(market_data) > 1:
                 # Use all available data if we don't have enough days
                 return (market_data['Close'].iloc[-1] - market_data['Close'].iloc[0]) / market_data['Close'].iloc[0] * 100
@@ -462,10 +521,36 @@ Provide actionable insights in JSON format:
         
         return reflection_data
         
-    def get_enhanced_analysis_prompt(self, base_prompt: str, ticker: str) -> str:
-        """Enhance analysis prompt with historical performance insights"""
+    def get_enhanced_analysis_prompt(self, base_prompt: str, ticker: str, config=None) -> str:
+        """Enhance analysis prompt with historical performance insights and consistency controls"""
         
-        # Get recent reflections
+        enhanced_prompt = base_prompt
+        
+        # Add historical context if enabled
+        if config and config.use_historical_context:
+            # Get recent analyses for style consistency
+            recent_analyses = self.tracker.get_recent_analyses(ticker, limit=2)
+            
+            if recent_analyses and config.analysis_style_consistency:
+                style_context = "\n\n## CONSISTENCY REFERENCE\n"
+                style_context += "Maintain consistency with these recent analyses:\n\n"
+                
+                for i, analysis in enumerate(recent_analyses[:2], 1):
+                    # Extract key summary from previous analysis
+                    analysis_summary = analysis['llm_analysis'][:500] + "..." if len(analysis['llm_analysis']) > 500 else analysis['llm_analysis']
+                    style_context += f"Analysis {i} ({analysis['prediction_date']}):\n"
+                    style_context += f"- Recommendation: {analysis['recommendation']} (Confidence: {analysis['confidence']})\n"
+                    style_context += f"- Analysis approach: {analysis_summary}\n\n"
+                
+                style_context += "CONSISTENCY INSTRUCTIONS:\n"
+                style_context += "- Use similar analytical depth and structure\n"
+                style_context += "- Maintain consistent confidence calibration\n"
+                style_context += "- Apply similar risk assessment frameworks\n"
+                style_context += "- Reference previous insights when relevant\n\n"
+                
+                enhanced_prompt = style_context + enhanced_prompt
+        
+        # Get recent reflections for performance context
         conn = sqlite3.connect(self.tracker.db_path)
         cursor = conn.cursor()
         
@@ -477,13 +562,12 @@ Provide actionable insights in JSON format:
         ''', (ticker,))
         
         recent_feedback = cursor.fetchone()
-        conn.close()
         
         if recent_feedback:
             columns = [description[0] for description in cursor.description]
             feedback_dict = dict(zip(columns, recent_feedback))
             
-            enhancement = f"""
+            performance_context = f"""
 
 ## HISTORICAL PERFORMANCE CONTEXT
 Based on analysis of {feedback_dict['total_predictions']} recent predictions:
@@ -496,6 +580,97 @@ Key Learnings:
 Apply these improvements:
 {feedback_dict['improvements']}
 """
-            return base_prompt + enhancement
+            enhanced_prompt = enhanced_prompt + performance_context
             
-        return base_prompt
+        conn.close()
+        return enhanced_prompt
+
+
+class ConsistencyValidator:
+    """Validate analysis consistency and provide metrics"""
+    
+    def __init__(self, tracker: PredictionTracker):
+        self.tracker = tracker
+        
+    def calculate_analysis_similarity(self, analysis1: str, analysis2: str) -> float:
+        """Calculate similarity between two analyses using basic text similarity"""
+        try:
+            # Simple word overlap similarity
+            words1 = set(analysis1.lower().split())
+            words2 = set(analysis2.lower().split())
+            
+            if not words1 or not words2:
+                return 0.0
+                
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
+            
+            return intersection / union if union > 0 else 0.0
+        except Exception:
+            return 0.0
+    
+    def validate_consistency(self, ticker: str) -> Dict[str, Any]:
+        """Validate consistency of recent analyses"""
+        recent_analyses = self.tracker.get_recent_analyses(ticker, limit=5)
+        
+        if len(recent_analyses) < 2:
+            return {
+                'consistency_score': 1.0,
+                'recommendation_consistency': 1.0,
+                'confidence_consistency': 1.0,
+                'analysis_text_similarity': 1.0,
+                'validation_summary': 'Insufficient data for consistency validation'
+            }
+        
+        # Check recommendation consistency
+        recommendations = [a['recommendation'] for a in recent_analyses]
+        rec_consistency = len(set(recommendations)) / len(recommendations)
+        
+        # Check confidence consistency
+        confidences = [a['confidence'] for a in recent_analyses]
+        conf_consistency = len(set(confidences)) / len(confidences)
+        
+        # Check text similarity (compare consecutive analyses)
+        similarities = []
+        for i in range(len(recent_analyses) - 1):
+            sim = self.calculate_analysis_similarity(
+                recent_analyses[i]['llm_analysis'],
+                recent_analyses[i + 1]['llm_analysis']
+            )
+            similarities.append(sim)
+        
+        avg_similarity = sum(similarities) / len(similarities) if similarities else 1.0
+        
+        # Overall consistency score (lower is more consistent)
+        consistency_score = (rec_consistency + conf_consistency + (1 - avg_similarity)) / 3
+        
+        return {
+            'consistency_score': 1 - consistency_score,  # Invert so higher is better
+            'recommendation_consistency': 1 - rec_consistency,
+            'confidence_consistency': 1 - conf_consistency,
+            'analysis_text_similarity': avg_similarity,
+            'validation_summary': f'Analyzed {len(recent_analyses)} recent predictions'
+        }
+    
+    def generate_consistency_report(self, ticker: str) -> str:
+        """Generate a consistency validation report"""
+        validation = self.validate_consistency(ticker)
+        
+        report = f"""
+## Consistency Validation Report for {ticker}
+
+**Overall Consistency Score**: {validation['consistency_score']:.2%}
+
+**Metrics:**
+- Recommendation Consistency: {validation['recommendation_consistency']:.2%}
+- Confidence Level Consistency: {validation['confidence_consistency']:.2%}
+- Analysis Text Similarity: {validation['analysis_text_similarity']:.2%}
+
+**Status**: {validation['validation_summary']}
+
+**Interpretation:**
+- Higher scores indicate more consistent analysis
+- Recommendation consistency shows how often the same action is recommended
+- Text similarity indicates consistent analytical approach
+"""
+        return report
