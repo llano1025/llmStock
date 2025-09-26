@@ -9,9 +9,9 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-from .llmAnalysis import Config, LLMProvider, OllamaProvider, EnhancedStockAnalyzer
-from .llmTracking import PredictionTracker, LLMReflectionEngine
-from .llm_models import PredictionRecord, PerformanceRecord
+from llm.llmAnalysis import Config, LLMProvider, OllamaProvider, EnhancedStockAnalyzer
+from llm.llmTracking import PredictionTracker, LLMReflectionEngine
+from llm.llm_models import PredictionRecord, PerformanceRecord
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,10 @@ def _create_provider(provider_type: str, config):
     """Create LLM provider with auto-detection logic"""
     if provider_type == 'auto':
         if config.gemini_api_key:
-            from .llmAnalysis import GeminiProvider
+            from llm.llmAnalysis import GeminiProvider
             return GeminiProvider(config=config)
         elif config.deepseek_api_key:
-            from .llmAnalysis import DeepSeekProvider
+            from llm.llmAnalysis import DeepSeekProvider
             return DeepSeekProvider(config=config)
         else:
             return OllamaProvider(config=config)
@@ -32,13 +32,13 @@ def _create_provider(provider_type: str, config):
     if provider_type == 'ollama':
         return OllamaProvider(config=config)
     elif provider_type == 'lmstudio':
-        from .llmAnalysis import LMStudioProvider
+        from llm.llmAnalysis import LMStudioProvider
         return LMStudioProvider(config=config)
     elif provider_type == 'gemini':
-        from .llmAnalysis import GeminiProvider
+        from llm.llmAnalysis import GeminiProvider
         return GeminiProvider(config=config)
     elif provider_type == 'deepseek':
-        from .llmAnalysis import DeepSeekProvider
+        from llm.llmAnalysis import DeepSeekProvider
         return DeepSeekProvider(config=config)
     else:
         raise ValueError(f"Unknown provider type: {provider_type}")
