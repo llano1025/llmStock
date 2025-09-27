@@ -92,6 +92,10 @@ class Config:
     sender_email: str = None
     sender_password: str = None
     recipient_emails: List[str] = field(default_factory=list)
+
+    # Model settings
+    predict_window: int = None
+    data_window: int = None
     
     # LLM API settings
     ollama_host: str = None
@@ -170,6 +174,10 @@ class Config:
         recipients_str = os.getenv('RECIPIENT_EMAILS', "")
         self.recipient_emails = [email.strip() for email in recipients_str.split(',') if email.strip()]
         
+        # Data settings
+        self.predict_window = int(os.getenv('PREDICT_WINDOW', "48"))
+        self.data_window = int(os.getenv('DATA_WINDOW', "96"))
+        
         # LLM API settings
         self.ollama_host = os.getenv('OLLAMA_HOST', "http://localhost:11434")
         self.lmstudio_host = os.getenv('LMSTUDIO_HOST', "http://localhost:1234/v1")
@@ -221,6 +229,10 @@ SMTP_PORT=587
 SENDER_EMAIL=your-email@gmail.com
 SENDER_PASSWORD=your-app-password
 RECIPIENT_EMAILS=recipient1@example.com,recipient2@example.com
+
+# Data settings
+PREDICT_WINDOW=48
+DATA_WINDOW=96
 
 # LLM API settings - Configure at least one provider
 # ==================================================
