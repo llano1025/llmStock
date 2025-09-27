@@ -527,7 +527,7 @@ def run_options_analysis(provider_type='auto'):
 
         # Get ticker list
         # ticker_list = runner.fetch_active_stocks(fetch_most_active_stocks)
-        ticker_list = ['TSLA']
+        ticker_list = ['NVDA', 'HOOD']
 
         # Setup plot directory
         plt_path = get_plot_path()
