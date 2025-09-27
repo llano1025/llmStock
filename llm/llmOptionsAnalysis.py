@@ -560,7 +560,6 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
 
             # Get LLM recommendations
             llm_response = self.llm.generate(prompt)
-            logger.info(f"{llm_response}")
 
             # Parse LLM recommendations into candidate format
             candidates = self._parse_llm_candidate_recommendations(llm_response, options_data, current_price)
@@ -889,17 +888,7 @@ Provide 2-3 recommendations in valid JSON format. Focus on options that offer th
 
                 # Extract structured recommendation from analysis
                 logger.debug(f"Attempting to extract recommendation from analysis for {ticker}")
-                analysis_result = self._extract_options_recommendation(analysis)
-
-                # Extract fields from dictionary
-                recommendation = analysis_result.get('recommendation', 'HOLD')
-                confidence = analysis_result.get('confidence', 'MEDIUM')
-                target_premium = analysis_result.get('target_premium')
-                max_loss = analysis_result.get('max_loss')
-
-                # Log extraction results
-                logger.info(f"Extracted from {ticker} analysis: {recommendation} ({confidence}), "
-                           f"target=${target_premium}, max_loss=${max_loss}")
+                analysis_result = self._extract_json_recommendation(analysis)
 
                 # Convert technical indicators to JSON-serializable format
                 serializable_indicators = {}
@@ -927,18 +916,19 @@ Provide 2-3 recommendations in valid JSON format. Focus on options that offer th
                     strike_price=candidate['strike'],
                     expiration_date=candidate['expiration_date'],
                     days_to_expiration=candidate['days_to_expiration'],
-                    recommendation=recommendation,
-                    confidence=confidence,
+                    recommendation=analysis_result.get('recommendation'),
+                    confidence=analysis_result.get('confidence'),
                     entry_premium=candidate['current_price'],
-                    target_premium=target_premium,
-                    max_loss=max_loss,
+                    target_premium=analysis_result.get('target_premium'),
+                    max_loss=analysis_result.get('max_loss'),
                     underlying_price=current_price,
                     implied_volatility=candidate['implied_volatility'],
                     volume=self._safe_int_convert(candidate['volume']),
                     open_interest=self._safe_int_convert(candidate['open_interest']),
                     greeks=greeks,
                     technical_indicators=serializable_indicators,
-                    llm_analysis=analysis,
+                    llm_analysis=analysis_result.get('reasoning'),
+                    risk_factor=analysis_result.get('risk_factors'),
                     sentiment_data=sentiment_data
                 )
 
@@ -1019,8 +1009,8 @@ ANALYSIS REQUIREMENTS:
 
 RESPONSE FORMAT (REQUIRED - JSON ONLY):
 {{
-  "recommendation": "BUY",
-  "confidence": "HIGH",
+  "recommendation": "BUY | SKIP",
+  "confidence": "HIGH | MEDIUM | LOW",
   "target_premium": 2.50,
   "max_loss": 1.00,
   "reasoning": "Detailed institutional-grade analysis considering all Greeks, market conditions, and risk management",
@@ -1037,41 +1027,6 @@ Provide valid JSON response with institutional-grade analysis.
 """
 
         return prompt
-
-    def _extract_options_recommendation(self, analysis: str) -> dict:
-        """Extract structured recommendation from LLM analysis with JSON support and fallbacks"""
-
-        # Try JSON parsing first
-        logger.debug("Attempting JSON extraction...")
-        json_result = self._extract_json_recommendation(analysis)
-        if json_result:
-            logger.info(f"JSON extraction successful")
-            return json_result
-        else:
-            logger.debug("JSON extraction failed")
-
-        # Fallback to text parsing
-        logger.debug("Attempting text extraction fallback...")
-        text_result = self._extract_text_recommendation(analysis)
-        logger.info(f"Text extraction result: {text_result}")
-
-        # Convert text result tuple to dictionary format for consistency
-        if text_result and len(text_result) == 4:
-            recommendation, confidence, target_premium, max_loss = text_result
-            return {
-                'recommendation': recommendation,
-                'confidence': confidence,
-                'target_premium': target_premium,
-                'max_loss': max_loss
-            }
-        else:
-            # Return default dictionary if text extraction also fails
-            return {
-                'recommendation': 'HOLD',
-                'confidence': 'MEDIUM',
-                'target_premium': None,
-                'max_loss': None
-            }
 
     def _extract_json_recommendation(self, analysis: str) -> Optional[dict]:
         """Extract recommendation from JSON format - returns full JSON structure from individual analysis"""
@@ -1097,8 +1052,6 @@ Provide valid JSON response with institutional-grade analysis.
             logger.debug(f"Successfully parsed JSON with keys: {list(data.keys())}")
 
             # Extract and validate core recommendation fields
-            recommendation = data.get('recommendation', 'HOLD').upper()
-            confidence = data.get('confidence', 'MEDIUM').upper()
             target_premium = data.get('target_premium')
             max_loss = data.get('max_loss')
 
@@ -1133,25 +1086,6 @@ Provide valid JSON response with institutional-grade analysis.
 
             target_premium = safe_float_convert(target_premium, "target_premium")
             max_loss = safe_float_convert(max_loss, "max_loss")
-
-            # Validate core fields
-            if recommendation not in ['BUY', 'SELL', 'HOLD']:
-                logger.warning(f"Invalid recommendation '{recommendation}', defaulting to HOLD")
-                recommendation = 'HOLD'
-
-            if confidence not in ['HIGH', 'MEDIUM', 'LOW']:
-                logger.warning(f"Invalid confidence '{confidence}', defaulting to MEDIUM")
-                confidence = 'MEDIUM'
-
-            # Update the original data with validated values
-            data['recommendation'] = recommendation
-            data['confidence'] = confidence
-            data['target_premium'] = target_premium
-            data['max_loss'] = max_loss
-
-            # Log extracted values for debugging
-            logger.debug(f"Validated JSON data: recommendation={recommendation}, confidence={confidence}, "
-                        f"target_premium={target_premium}, max_loss={max_loss}")
 
             return data
 

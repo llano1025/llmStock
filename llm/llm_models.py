@@ -83,6 +83,7 @@ class OptionsPredictionRecord:
     greeks: Dict[str, float]  # delta, gamma, theta, vega, rho
     technical_indicators: Dict[str, float]
     llm_analysis: str
+    risk_factor: str
     sentiment_data: Dict[str, Any]
 
 

@@ -313,6 +313,277 @@ class EmailSender:
         except Exception as e:
             print(f"Error sending email: {str(e)}")
 
+    def _split_multi_option_analysis(self, reasoning_text):
+        """
+        Split combined analysis text into individual option analyses
+
+        Args:
+            reasoning_text: Combined analysis text for multiple options
+
+        Returns:
+            List of individual option analysis texts
+        """
+        import re
+
+        # Patterns to identify option analysis starts
+        option_patterns = [
+            r'This\s+\w+\s+(CALL|PUT)\s+option\s+(?:with\s+a\s+strike\s+of\s+)?\$(\d+(?:\.\d{2})?)',
+            r'This\s+analysis\s+focuses\s+on\s+a\s+\w+\s+(CALL|PUT)\s+option\s+(?:with\s+a\s+strike\s+of\s+)?\$(\d+(?:\.\d{2})?)',
+            r'(\w+)\s+(CALL|PUT)\s+option\s+(?:at\s+a\s+)?\$(\d+(?:\.\d{2})?)\s+strike'
+        ]
+
+        # Find all potential option starts
+        option_starts = []
+        for pattern in option_patterns:
+            matches = re.finditer(pattern, reasoning_text, re.IGNORECASE)
+            for match in matches:
+                option_starts.append({
+                    'start': match.start(),
+                    'end': match.end(),
+                    'match_text': match.group(0)
+                })
+
+        # Sort by position
+        option_starts = sorted(option_starts, key=lambda x: x['start'])
+
+        # If we found multiple option starts, split the text
+        if len(option_starts) > 1:
+            analyses = []
+            for i, start_info in enumerate(option_starts):
+                start_pos = start_info['start']
+                end_pos = option_starts[i + 1]['start'] if i + 1 < len(option_starts) else len(reasoning_text)
+
+                analysis_text = reasoning_text[start_pos:end_pos].strip()
+                analyses.append(analysis_text)
+
+            return analyses
+        else:
+            # Single option analysis
+            return [reasoning_text]
+
+    def _format_single_option_analysis(self, reasoning_text, action='N/A', confidence='N/A', risk_factor=None, option_number=None):
+        """
+        Format a single option analysis with extracted details
+
+        Args:
+            reasoning_text: Analysis text for one option
+            action: Recommendation (BUY/SELL/HOLD/SKIP)
+            confidence: Confidence level
+            risk_factor: Risk factors (array or string)
+            option_number: Option number for multi-option scenarios
+
+        Returns:
+            Formatted HTML string for single option
+        """
+        import re
+        from datetime import date, timedelta, datetime
+
+        # Extract option details from reasoning text using regex
+        ticker = 'N/A'
+        option_type = 'N/A'
+        strike = 'N/A'
+        days = 'N/A'
+        expiration = 'N/A'
+
+        if reasoning_text:
+            # Extract ticker (e.g., "TSLA CALL option")
+            ticker_match = re.search(r'(\b[A-Z]{2,5}\b)\s+(CALL|PUT)', reasoning_text, re.IGNORECASE)
+            if ticker_match:
+                ticker = ticker_match.group(1)
+                option_type = ticker_match.group(2).upper()
+
+            # Extract strike price (e.g., "strike of $450", "$450 strike")
+            strike_match = re.search(r'strike\s+(?:of\s+)?\$(\d+(?:\.\d{2})?)|(\$\d+(?:\.\d{2})?)\s+strike', reasoning_text)
+            if strike_match:
+                strike_price = strike_match.group(1) or strike_match.group(2).replace('$', '')
+                strike = f"${float(strike_price):.2f}"
+
+            # Extract days to expiration (e.g., "expiring in 20 days", "20 days to expiration", "(6 days)")
+            days_matches = [
+                re.search(r'(?:expiring\s+(?:in\s+|on\s+)?)(\d+)\s+days?|(\d+)\s+days?\s+(?:to\s+)?expiration', reasoning_text),
+                re.search(r'\((\d+)\s+days?\)', reasoning_text),
+                re.search(r'with\s+only\s+(\d+)\s+days?\s+(?:to\s+expiration|left)', reasoning_text)
+            ]
+
+            for days_match in days_matches:
+                if days_match:
+                    days_num = days_match.group(1) or days_match.group(2)
+                    days = f"{days_num} Days"
+
+                    # Calculate approximate expiration date
+                    try:
+                        exp_date = date.today() + timedelta(days=int(days_num))
+                        expiration = exp_date.strftime('%Y-%m-%d')
+                    except:
+                        expiration = 'N/A'
+                    break
+
+            # Extract specific expiration dates (e.g., "2025-10-03", "2025-12-19")
+            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', reasoning_text)
+            if date_match:
+                expiration = date_match.group(1)
+                # Calculate days if we have the date
+                try:
+                    exp_date = datetime.strptime(expiration, '%Y-%m-%d').date()
+                    today = date.today()
+                    days_diff = (exp_date - today).days
+                    days = f"{days_diff} Days"
+                except:
+                    pass
+
+        # Create formatted heading with option number if provided
+        option_prefix = f"Option {option_number}: " if option_number else ""
+        heading = f"{option_prefix}{ticker} {option_type} | {strike} | {expiration} | {days} | {action} | {confidence}"
+
+        # Format reasoning section
+        reasoning_html = f"""
+        <h4>Reasoning</h4>
+        <div class="analysis-content">
+            {self.md.render(reasoning_text)}
+        </div>
+        """ if reasoning_text else ""
+
+        return f"""
+        <h3>{heading}</h3>
+        {reasoning_html}
+        """
+
+    def _format_multi_option_analysis_for_predictions(self, llm_analysis, predictions):
+        """
+        Format combined analysis by mapping split sections to individual predictions
+
+        Args:
+            llm_analysis: Combined analysis text or JSON for multiple options
+            predictions: List of prediction objects with option details
+
+        Returns:
+            Formatted HTML string with properly separated option analyses
+        """
+        import json
+
+        try:
+            # Parse JSON if it's a string
+            if isinstance(llm_analysis, str):
+                analysis_data = json.loads(llm_analysis)
+            else:
+                analysis_data = llm_analysis
+
+            # Get top-level fields
+            action = analysis_data.get('recommendation', 'N/A')
+            confidence = analysis_data.get('confidence', 'N/A')
+            reasoning = analysis_data.get('reasoning', '')
+            risk_factor = analysis_data.get('risk_factors', '')
+
+            # Split the combined reasoning into individual analyses
+            individual_analyses = self._split_multi_option_analysis(reasoning)
+
+            # Map each analysis section to a prediction
+            formatted_sections = []
+            for i, prediction in enumerate(predictions):
+                # Use the corresponding analysis section if available, otherwise use the full text
+                analysis_text = individual_analyses[i] if i < len(individual_analyses) else reasoning
+
+                # Create heading using prediction data
+                option_prefix = f"Option {i + 1}: " if len(predictions) > 1 else ""
+                heading = f"{option_prefix}{prediction.ticker} {prediction.option_type} | ${prediction.strike_price:.2f} | {prediction.expiration_date} | {prediction.days_to_expiration} Days | {prediction.recommendation} | {prediction.confidence}"
+
+                # Format reasoning section
+                reasoning_html = f"""
+                <h4>Reasoning</h4>
+                <div class="analysis-content">
+                    {self.md.render(analysis_text)}
+                </div>
+                """ if analysis_text else ""
+
+                # Format risk factors section (shared across all options)
+                risk_factor_html = ""
+                if risk_factor and i == 0:  # Only show risk factors for the first option to avoid repetition
+                    if isinstance(risk_factor, list):
+                        risk_list = "\n".join([f"- {factor}" for factor in risk_factor])
+                        risk_factor_html = f"""
+                        <h4>Risk Factors (Common to All Options)</h4>
+                        <div class="analysis-content">
+                            {self.md.render(risk_list)}
+                        </div>
+                        """
+                    else:
+                        risk_factor_html = f"""
+                        <h4>Risk Factors (Common to All Options)</h4>
+                        <div class="analysis-content">
+                            {self.md.render(str(risk_factor))}
+                        </div>
+                        """
+
+                section_html = f"""
+                <h3>{heading}</h3>
+                {reasoning_html}
+                {risk_factor_html}
+                """
+                formatted_sections.append(section_html)
+
+            return '\n'.join(formatted_sections)
+
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            # Fallback: use existing logic for each prediction
+            formatted_sections = []
+            for i, prediction in enumerate(predictions):
+                section_html = self._format_single_option_analysis(
+                    str(llm_analysis),
+                    prediction.recommendation,
+                    prediction.confidence,
+                    None,
+                    i + 1
+                )
+                formatted_sections.append(section_html)
+            return '\n'.join(formatted_sections)
+
+    def _format_options_analysis(self, llm_analysis, prediction=None):
+        """
+        Format options analysis data with structured layout
+
+        Args:
+            llm_analysis: Either JSON object or plain text analysis
+            prediction: Optional prediction object with options details
+
+        Returns:
+            Formatted HTML string
+        """
+        import json
+        import re
+        from datetime import datetime, date, timedelta
+
+        # Try to parse as JSON first
+        try:
+            if isinstance(llm_analysis, str):
+                analysis_data = json.loads(llm_analysis)
+            else:
+                analysis_data = llm_analysis
+
+            # Get top-level fields first
+            action = analysis_data.get('recommendation', 'N/A')
+            confidence = analysis_data.get('confidence', 'N/A')
+            reasoning = analysis_data.get('reasoning', '')
+            risk_factor = analysis_data.get('risk_factors', '')
+
+            # Check if this is a multi-option analysis
+            individual_analyses = self._split_multi_option_analysis(reasoning)
+
+            if len(individual_analyses) > 1:
+                # Multiple options detected - format each separately
+                formatted_sections = []
+                for i, analysis_text in enumerate(individual_analyses):
+                    section_html = self._format_single_option_analysis(analysis_text, action, confidence, risk_factor, i + 1)
+                    formatted_sections.append(section_html)
+
+                return '\n'.join(formatted_sections)
+            else:
+                # Single option - use existing logic
+                return self._format_single_option_analysis(reasoning, action, confidence, risk_factor)
+
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            # Fallback to original markdown rendering for plain text
+            return self.md.render(str(llm_analysis))
+
     def create_options_html_report(self, options_results):
         """
         Create dedicated HTML report for options trading analysis
@@ -337,125 +608,76 @@ class EmailSender:
         <html>
         <head>
             <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    margin: 0;
-                    padding: 20px;
-                    background-color: #f5f5f5;
-                }}
-                .container {{
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    background-color: white;
-                    padding: 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                }}
-                .header {{
-                    text-align: center;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 20px;
-                    border-radius: 8px;
-                    margin-bottom: 20px;
-                }}
-                .header h1 {{
-                    margin: 0;
-                    font-size: 28px;
-                }}
-                .header .subtitle {{
-                    margin: 10px 0 0 0;
-                    font-size: 16px;
-                    opacity: 0.9;
-                }}
-                .metrics {{
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 15px;
-                    margin-bottom: 25px;
-                    padding: 15px;
-                    background-color: #f8f9fa;
-                    border-radius: 6px;
-                }}
-                .metric {{
-                    flex: 1;
-                    min-width: 200px;
-                    text-align: center;
-                    padding: 10px;
-                    background-color: white;
-                    border-radius: 4px;
-                    border-left: 4px solid #667eea;
-                }}
-                .metric strong {{
-                    display: block;
-                    font-size: 18px;
-                    color: #333;
-                }}
-                .metric .value {{
-                    font-size: 24px;
+                .recommendation {{
                     font-weight: bold;
-                    color: #667eea;
-                    margin-top: 5px;
+                    padding: 5px 10px;
+                    border-radius: 3px;
                 }}
-                .summary-table {{
-                    width: 100%;
+                .BUY {{
+                    background-color: #d4edda;
+                    color: #155724;
+                }}
+                .SELL {{
+                    background-color: #f8d7da;
+                    color: #721c24;
+                }}
+                .HOLD {{
+                    background-color: #fff3cd;
+                    color: #856404;
+                }}
+                .symbol-link {{
+                    color: #0366d6;
+                    text-decoration: none;
+                }}
+                .symbol-link:hover {{
+                    text-decoration: underline;
+                }}
+                html {{
+                    scroll-behavior: smooth;
+                }}
+                .stock-analysis {{
+                    scroll-margin-top: 20px;
+                    margin-bottom: 30px;
+                }}
+                table {{
                     border-collapse: collapse;
-                    margin-bottom: 25px;
-                    background-color: white;
-                    border-radius: 6px;
-                    overflow: hidden;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    margin-bottom: 20px;
+                    width: 100%;
                 }}
-                .summary-table th {{
-                    background-color: #667eea;
-                    color: white;
-                    padding: 12px;
+                th, td {{
+                    border: 1px solid #dee2e6;
+                    padding: 8px;
                     text-align: left;
+                }}
+                th {{
+                    background-color: #f8f9fa;
                     font-weight: bold;
                 }}
-                .summary-table td {{
-                    padding: 10px 12px;
-                    border-bottom: 1px solid #eee;
-                }}
-                .summary-table tr:nth-child(even) {{
+                tr:nth-child(even) {{
                     background-color: #f8f9fa;
-                }}
-                .summary-table tr:hover {{
-                    background-color: #e3f2fd;
                 }}
                 .option-type {{
                     font-weight: bold;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    color: white;
+                    padding: 2px 6px;
+                    border-radius: 3px;
                     font-size: 12px;
                 }}
                 .CALL {{
-                    background-color: #4caf50;
-                }}
-                .PUT {{
-                    background-color: #f44336;
-                }}
-                .confidence {{
-                    font-weight: bold;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }}
-                .HIGH {{
                     background-color: #d4edda;
                     color: #155724;
-                    border: 1px solid #c3e6cb;
                 }}
-                .MEDIUM {{
-                    background-color: #fff3cd;
-                    color: #856404;
-                    border: 1px solid #faeeba;
-                }}
-                .LOW {{
+                .PUT {{
                     background-color: #f8d7da;
                     color: #721c24;
-                    border: 1px solid #f5c6cb;
+                }}
+                .HIGH {{
+                    border-left: 4px solid #28a745;
+                }}
+                .MEDIUM {{
+                    border-left: 4px solid #ffc107;
+                }}
+                .LOW {{
+                    border-left: 4px solid #6c757d;
                 }}
                 .ticker-analysis {{
                     margin-bottom: 30px;
@@ -507,6 +729,44 @@ class EmailSender:
                     color: #667eea;
                     margin-top: 0;
                 }}
+                .analysis-text h3 {{
+                    color: #333;
+                    font-size: 18px;
+                    font-weight: bold;
+                    margin: 20px 0 15px 0;
+                    padding: 10px;
+                    background-color: #e9ecef;
+                    border-radius: 4px;
+                    border-left: 4px solid #667eea;
+                }}
+                .analysis-content {{
+                    margin: 10px 0;
+                    padding: 0 10px;
+                }}
+                .analysis-content h4 {{
+                    color: #495057;
+                    font-size: 16px;
+                    margin: 15px 0 10px 0;
+                    font-weight: bold;
+                }}
+                .analysis-content p {{
+                    margin-bottom: 10px;
+                    line-height: 1.6;
+                }}
+                .analysis-content ul, .analysis-content ol {{
+                    margin: 10px 0 10px 20px;
+                }}
+                .analysis-content li {{
+                    margin-bottom: 5px;
+                    line-height: 1.5;
+                }}
+                .analysis-content strong {{
+                    font-weight: bold;
+                    color: #333;
+                }}
+                .analysis-content em {{
+                    font-style: italic;
+                }}
                 .symbol-link {{
                     color: #667eea;
                     text-decoration: none;
@@ -519,49 +779,43 @@ class EmailSender:
                     display: inline-block;
                     margin-top: 15px;
                     padding: 8px 15px;
-                    background-color: #667eea;
-                    color: white;
-                    text-decoration: none;
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
                     border-radius: 4px;
+                    color: #0366d6;
+                    text-decoration: none;
                     font-size: 14px;
                 }}
                 .jump-to-top:hover {{
-                    background-color: #5a6fd8;
+                    background-color: #e9ecef;
                     text-decoration: none;
                 }}
             </style>
         </head>
         <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📈 Options Trading Analysis Report</h1>
-                    <div class="subtitle">Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
-                </div>
+            <h1>Options Trading Analysis Report</h1>
+            <p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
 
-                <div class="metrics">
-                    <div class="metric">
-                        <strong>Tickers Analyzed</strong>
-                        <div class="value">{total_tickers}</div>
-                    </div>
-                    <div class="metric">
-                        <strong>Total Recommendations</strong>
-                        <div class="value">{total_recommendations}</div>
-                    </div>
-                    <div class="metric">
-                        <strong>High Confidence</strong>
-                        <div class="value">{high_confidence_count}</div>
-                    </div>
-                    <div class="metric">
-                        <strong>CALL Options</strong>
-                        <div class="value">{call_count}</div>
-                    </div>
-                    <div class="metric">
-                        <strong>PUT Options</strong>
-                        <div class="value">{put_count}</div>
-                    </div>
+            <h2>Market Overview</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Tickers Analyzed:</strong> {total_tickers}
                 </div>
+                <div class="metric">
+                    <strong>Total Recommendations:</strong> {total_recommendations}
+                </div>
+                <div class="metric">
+                    <strong>High Confidence:</strong> {high_confidence_count}
+                </div>
+                <div class="metric">
+                    <strong>CALL Options:</strong> {call_count}
+                </div>
+                <div class="metric">
+                    <strong>PUT Options:</strong> {put_count}
+                </div>
+            </div>
 
-                <h2>📊 Summary Table</h2>
+                <h2>Summary Table</h2>
                 <table class="summary-table">
                     <tr>
                         <th>Ticker</th>
@@ -608,7 +862,7 @@ class EmailSender:
         html += """
                 </table>
 
-                <h2>🔍 Detailed Analysis</h2>
+                <h2>Detailed Analysis</h2>
         """
 
         # Detailed analysis for each ticker
@@ -623,14 +877,14 @@ class EmailSender:
             html += f"""
                 <div id="{symbol_id}" class="ticker-analysis">
                     <div class="ticker-header">
-                        <h3>🎯 {ticker} Options Analysis</h3>
+                        <h3>{ticker} Options Analysis</h3>
                         <p><strong>Current Price:</strong> ${current_price:.2f} | <strong>Recommendations:</strong> {len(predictions)}</p>
                     </div>
             """
 
             if predictions:
                 html += """
-                    <h4>📋 Options Recommendations</h4>
+                    <h4>Options Recommendations</h4>
                     <table class="options-table">
                         <tr>
                             <th>Type</th>
@@ -661,12 +915,14 @@ class EmailSender:
 
                 html += "</table>"
 
-            # Add LLM analysis
-            if llm_analysis:
-                analysis_html = self.md.render(llm_analysis)
+            # Add LLM analysis with structured formatting
+            if llm_analysis and predictions:
+
+                analysis_html = self._format_multi_option_analysis_for_predictions(llm_analysis, predictions)
+
                 html += f"""
                     <div class="analysis-text">
-                        <h4>🤖 AI Analysis & Market Insights</h4>
+                        <h4>AI Analysis & Market Insights</h4>
                         {analysis_html}
                     </div>
                 """
@@ -675,7 +931,7 @@ class EmailSender:
             if summary:
                 html += f"""
                     <div class="analysis-text">
-                        <h4>📈 Technical Summary</h4>
+                        <h4>Technical Summary</h4>
                         <pre>{summary}</pre>
                     </div>
                 """
@@ -684,11 +940,8 @@ class EmailSender:
             html += "</div>"
 
         html += """
-                <div style="text-align: center; margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 6px;">
-                    <p><em>📊 Technical analysis charts are attached to this email for detailed visualization.</em></p>
-                    <p style="color: #666; font-size: 12px;">This report is generated by AI-powered options analysis. Please consult with a financial advisor before making trading decisions.</p>
-                </div>
-            </div>
+            <p>Note: Technical analysis charts are attached to this email.</p>
+            <p style="color: #666; font-size: 12px;">This report is generated by AI-powered options analysis. Please consult with a financial advisor before making trading decisions.</p>
         </body>
         </html>
         """

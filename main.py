@@ -219,51 +219,54 @@ def main(provider_type='auto'):
 
 # Main execution
 if __name__ == "__main__":
-    # Parse command line arguments (special cases already handled above)
-    parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
-    parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
-                       default='analyze', help='Operation mode')
-    parser.add_argument('--provider', choices=['auto', 'ollama', 'lmstudio', 'gemini', 'deepseek'],
-                       default='auto', help='LLM provider to use (default: auto-detect)')
-    parser.add_argument('--list-providers', action='store_true',
-                       help='List available LLM providers and exit')
-    args = parser.parse_args()
+    # # Parse command line arguments (special cases already handled above)
+    # parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
+    # parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
+    #                    default='analyze', help='Operation mode')
+    # parser.add_argument('--provider', choices=['auto', 'ollama', 'lmstudio', 'gemini', 'deepseek'],
+    #                    default='auto', help='LLM provider to use (default: auto-detect)')
+    # parser.add_argument('--list-providers', action='store_true',
+    #                    help='List available LLM providers and exit')
+    # args = parser.parse_args()
     
-    if args.mode == 'analyze':
-        main(provider_type=args.provider)
-    elif args.mode == 'reflect':
-        from runner.reflection_runner import run_weekly_reflection
-        run_weekly_reflection(provider_type=args.provider)
-    elif args.mode == 'test':
-        from runner.reflection_runner import test_prediction_tracking
-        test_prediction_tracking(provider_type=args.provider)
-    elif args.mode == 'options':
+    # if args.mode == 'analyze':
+    #     main(provider_type=args.provider)
+    # elif args.mode == 'reflect':
+    #     from runner.reflection_runner import run_weekly_reflection
+    #     run_weekly_reflection(provider_type=args.provider)
+    # elif args.mode == 'test':
+    #     from runner.reflection_runner import test_prediction_tracking
+    #     test_prediction_tracking(provider_type=args.provider)
+    # elif args.mode == 'options':
+    #     from runner.options_analysis_runner import run_options_analysis
+    #     run_options_analysis(provider_type=args.provider)
+    # elif args.mode == 'options-reflect':
+    #     from llm.llmOptionsReflection import OptionsLLMReflectionEngine
+    #     from llm.llmOptionsAnalysis import OptionsTracker
+    #     from utils.utils_path import get_project_root
+
+    #     # Initialize configuration and LLM provider
+    #     config = Config()
+    #     llm_provider = create_llm_provider(args.provider, config)
+
+    #     # Initialize options components
+    #     db_path = get_project_root() / 'options_predictions.db'
+    #     options_tracker = OptionsTracker(db_path)
+    #     reflection_engine = OptionsLLMReflectionEngine(llm_provider, options_tracker)
+
+    #     # Generate reflection for all tickers
+    #     reflection = reflection_engine.generate_options_reflection('ALL', days=30)
+    #     print(f"\nOptions Trading Reflection ({reflection.period_start} to {reflection.period_end}):")
+    #     print("=" * 60)
+    #     print(f"Total Predictions: {reflection.total_predictions}")
+    #     print(f"Success Rates by Type: {reflection.success_rate_by_type}")
+    #     print(f"Success Rates by Expiration: {reflection.success_rate_by_expiration}")
+    #     print("\nReflection:")
+    #     print(reflection.reflection)
+    #     print("\nImprovements:")
+    #     print(reflection.improvements)
+    #     print("\nMarket Analysis:")
+    #     print(reflection.market_regime_analysis)
+
         from runner.options_analysis_runner import run_options_analysis
-        run_options_analysis(provider_type=args.provider)
-    elif args.mode == 'options-reflect':
-        from llm.llmOptionsReflection import OptionsLLMReflectionEngine
-        from llm.llmOptionsAnalysis import OptionsTracker
-        from utils.utils_path import get_project_root
-
-        # Initialize configuration and LLM provider
-        config = Config()
-        llm_provider = create_llm_provider(args.provider, config)
-
-        # Initialize options components
-        db_path = get_project_root() / 'options_predictions.db'
-        options_tracker = OptionsTracker(db_path)
-        reflection_engine = OptionsLLMReflectionEngine(llm_provider, options_tracker)
-
-        # Generate reflection for all tickers
-        reflection = reflection_engine.generate_options_reflection('ALL', days=30)
-        print(f"\nOptions Trading Reflection ({reflection.period_start} to {reflection.period_end}):")
-        print("=" * 60)
-        print(f"Total Predictions: {reflection.total_predictions}")
-        print(f"Success Rates by Type: {reflection.success_rate_by_type}")
-        print(f"Success Rates by Expiration: {reflection.success_rate_by_expiration}")
-        print("\nReflection:")
-        print(reflection.reflection)
-        print("\nImprovements:")
-        print(reflection.improvements)
-        print("\nMarket Analysis:")
-        print(reflection.market_regime_analysis)
+        run_options_analysis(provider_type='gemini')
