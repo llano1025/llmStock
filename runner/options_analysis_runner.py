@@ -141,16 +141,6 @@ class OptionsAnalysisRunner:
             # Get current price from predictions (they all have underlying_price)
             current_price = predictions[0].underlying_price if predictions else 0.0
 
-            # Get LLM analysis from the first prediction or create a summary
-            llm_analysis = ""
-            if predictions:
-                # Collect unique LLM analyses from predictions
-                analyses = list(set(pred.llm_analysis for pred in predictions if pred.llm_analysis))
-                if analyses:
-                    llm_analysis = "\n\n".join(analyses[:3])  # Top 3 unique analyses
-                else:
-                    llm_analysis = f"Generated {len(predictions)} options recommendations based on technical analysis and market conditions."
-
             # Prepare results summary
             result = {
                 'ticker': ticker,
@@ -160,8 +150,7 @@ class OptionsAnalysisRunner:
                 'plot_file': plot_file,
                 'best_call_prediction': self._get_best_prediction(predictions, 'CALL'),
                 'best_put_prediction': self._get_best_prediction(predictions, 'PUT'),
-                'summary': self._create_ticker_summary(ticker, predictions),
-                'llm_analysis': llm_analysis
+                'summary': self._create_ticker_summary(ticker, predictions)
             }
 
             logger.info(f"Generated {len(predictions)} options predictions for {ticker}")
@@ -338,7 +327,7 @@ class OptionsAnalysisRunner:
 
         try:
             # Create email subject
-            subject = f"Options Trading Analysis Report - {len(analysis_results)} Tickers Analyzed"
+            subject = f"Options Analysis Report - {datetime.now().strftime('%Y-%m-%d')}"
 
             # Filter valid plot files
             valid_plots = [f for f in plot_files if f and os.path.exists(f)]
@@ -373,8 +362,7 @@ class OptionsAnalysisRunner:
                 'plot_file': None,
                 'best_call_prediction': None,
                 'best_put_prediction': None,
-                'summary': diagnostic_info,
-                'llm_analysis': 'No options analysis could be performed due to market conditions or data availability. See diagnostic information for details.'
+                'summary': diagnostic_info
             }]
 
             subject = f"Options Analysis Report - Market Conditions Prevented Analysis ({len(ticker_list)} tickers attempted)"
@@ -414,8 +402,7 @@ class OptionsAnalysisRunner:
                     'plot_file': None,
                     'best_call_prediction': None,
                     'best_put_prediction': None,
-                    'summary': f"Failed Analysis for: {', '.join(failed_tickers)}",
-                    'llm_analysis': diagnostic_info
+                    'summary': f"Failed Analysis for: {', '.join(failed_tickers)}\n\n{diagnostic_info}"
                 }
 
                 # Add diagnostic info to results
@@ -526,8 +513,7 @@ def run_options_analysis(provider_type='auto'):
         runner.run_weekly_options_performance_check()
 
         # Get ticker list
-        # ticker_list = runner.fetch_active_stocks(fetch_most_active_stocks)
-        ticker_list = ['NVDA', 'HOOD']
+        ticker_list = runner.fetch_active_stocks(fetch_most_active_stocks)
 
         # Setup plot directory
         plt_path = get_plot_path()

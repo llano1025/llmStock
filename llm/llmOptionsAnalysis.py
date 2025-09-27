@@ -107,7 +107,7 @@ class OptionsDataFetcher:
             Dictionary with expiration dates as keys and options dataframes as values
         """
         if expiration_days is None:
-            expiration_days = [7, 14, 21, 28, 56, 84, 175]
+            expiration_days = [14, 21, 28, 56, 84, 175]
 
         try:
             stock = yf.Ticker(ticker)

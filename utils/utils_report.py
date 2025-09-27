@@ -448,94 +448,41 @@ class EmailSender:
         {reasoning_html}
         """
 
-    def _format_multi_option_analysis_for_predictions(self, llm_analysis, predictions):
+    def _format_multi_option_analysis(self, predictions):
         """
-        Format combined analysis by mapping split sections to individual predictions
+        Format options analysis using the llm_analysis from each prediction directly
 
         Args:
-            llm_analysis: Combined analysis text or JSON for multiple options
-            predictions: List of prediction objects with option details
+            predictions: List of prediction objects with option details and llm_analysis
 
         Returns:
             Formatted HTML string with properly separated option analyses
         """
-        import json
+        # Map each prediction's analysis to its details
+        formatted_sections = []
+        for i, prediction in enumerate(predictions):
+            # Get analysis directly from prediction
+            analysis_text = prediction.llm_analysis if hasattr(prediction, 'llm_analysis') and prediction.llm_analysis else ""
 
-        try:
-            # Parse JSON if it's a string
-            if isinstance(llm_analysis, str):
-                analysis_data = json.loads(llm_analysis)
-            else:
-                analysis_data = llm_analysis
+            # Create heading using prediction data
+            option_prefix = f"Option {i + 1}: " if len(predictions) > 1 else ""
+            heading = f"{option_prefix}{prediction.ticker} {prediction.option_type} | ${prediction.strike_price:.2f} | {prediction.expiration_date} | {prediction.days_to_expiration} Days | {prediction.recommendation} | {prediction.confidence}"
 
-            # Get top-level fields
-            action = analysis_data.get('recommendation', 'N/A')
-            confidence = analysis_data.get('confidence', 'N/A')
-            reasoning = analysis_data.get('reasoning', '')
-            risk_factor = analysis_data.get('risk_factors', '')
+            # Format reasoning section
+            reasoning_html = f"""
+            <h4>Reasoning</h4>
+            <div class="analysis-content">
+                {self.md.render(analysis_text)}
+            </div>
+            """ if analysis_text else ""
 
-            # Split the combined reasoning into individual analyses
-            individual_analyses = self._split_multi_option_analysis(reasoning)
+            section_html = f"""
+            <h3>{heading}</h3>
+            {reasoning_html}
+            """
+            formatted_sections.append(section_html)
 
-            # Map each analysis section to a prediction
-            formatted_sections = []
-            for i, prediction in enumerate(predictions):
-                # Use the corresponding analysis section if available, otherwise use the full text
-                analysis_text = individual_analyses[i] if i < len(individual_analyses) else reasoning
-
-                # Create heading using prediction data
-                option_prefix = f"Option {i + 1}: " if len(predictions) > 1 else ""
-                heading = f"{option_prefix}{prediction.ticker} {prediction.option_type} | ${prediction.strike_price:.2f} | {prediction.expiration_date} | {prediction.days_to_expiration} Days | {prediction.recommendation} | {prediction.confidence}"
-
-                # Format reasoning section
-                reasoning_html = f"""
-                <h4>Reasoning</h4>
-                <div class="analysis-content">
-                    {self.md.render(analysis_text)}
-                </div>
-                """ if analysis_text else ""
-
-                # Format risk factors section (shared across all options)
-                risk_factor_html = ""
-                if risk_factor and i == 0:  # Only show risk factors for the first option to avoid repetition
-                    if isinstance(risk_factor, list):
-                        risk_list = "\n".join([f"- {factor}" for factor in risk_factor])
-                        risk_factor_html = f"""
-                        <h4>Risk Factors (Common to All Options)</h4>
-                        <div class="analysis-content">
-                            {self.md.render(risk_list)}
-                        </div>
-                        """
-                    else:
-                        risk_factor_html = f"""
-                        <h4>Risk Factors (Common to All Options)</h4>
-                        <div class="analysis-content">
-                            {self.md.render(str(risk_factor))}
-                        </div>
-                        """
-
-                section_html = f"""
-                <h3>{heading}</h3>
-                {reasoning_html}
-                {risk_factor_html}
-                """
-                formatted_sections.append(section_html)
-
-            return '\n'.join(formatted_sections)
-
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            # Fallback: use existing logic for each prediction
-            formatted_sections = []
-            for i, prediction in enumerate(predictions):
-                section_html = self._format_single_option_analysis(
-                    str(llm_analysis),
-                    prediction.recommendation,
-                    prediction.confidence,
-                    None,
-                    i + 1
-                )
-                formatted_sections.append(section_html)
-            return '\n'.join(formatted_sections)
+        return '\n'.join(formatted_sections)
 
     def _format_options_analysis(self, llm_analysis, prediction=None):
         """
@@ -793,6 +740,7 @@ class EmailSender:
             </style>
         </head>
         <body>
+            <div id="top"></div>
             <h1>Options Trading Analysis Report</h1>
             <p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
 
@@ -871,7 +819,6 @@ class EmailSender:
             current_price = result.get('current_price', 0)
             predictions = result.get('predictions', [])
             summary = result.get('summary', '')
-            llm_analysis = result.get('llm_analysis', '')
             symbol_id = f"analysis-{ticker}"
 
             html += f"""
@@ -916,9 +863,9 @@ class EmailSender:
                 html += "</table>"
 
             # Add LLM analysis with structured formatting
-            if llm_analysis and predictions:
+            if predictions:
 
-                analysis_html = self._format_multi_option_analysis_for_predictions(llm_analysis, predictions)
+                analysis_html = self._format_multi_option_analysis(predictions)
 
                 html += f"""
                     <div class="analysis-text">
