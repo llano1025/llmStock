@@ -19,18 +19,16 @@ from datetime import datetime
 def show_providers_help():
     """Show available providers without importing modules"""
     print("Available LLM Providers:")
-    print("  auto      - Auto-detect based on configuration (default)")
     print("  ollama    - Local Ollama server (requires Ollama running)")
     print("  lmstudio  - Local LM Studio server (requires LM Studio running)")
     print("  gemini    - Google Gemini API (requires GEMINI_API_KEY)")
-    print("  deepseek  - DeepSeek API (requires DEEPSEEK_API_KEY)")
+    print("  openai    - OpenAI API (requires OPENAI_API_KEY)")
     print("\nConfiguration:")
     print("  Set API keys in .env file for cloud providers")
     print("  Ensure local servers are running for local providers")
     print("\nUsage Examples:")
-    print("  python main.py --provider ollama")
-    print("  python main.py --provider gemini --mode analyze")
-    print("  python main.py --provider auto  # Auto-detect (default)")
+    print("  python main.py")
+    print("  python main.py --mode analyze")
 
 # Handle special options before importing modules
 if __name__ == "__main__":
@@ -44,8 +42,6 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
         parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
                            default='analyze', help='Operation mode')
-        parser.add_argument('--provider', choices=['auto', 'ollama', 'lmstudio', 'gemini', 'deepseek'],
-                           default='auto', help='LLM provider to use (default: auto-detect)')
         parser.add_argument('--list-providers', action='store_true',
                            help='List available LLM providers and exit')
         parser.print_help()
@@ -63,8 +59,8 @@ matplotlib.use('Agg')  # Non-interactive backend
 # Core application imports - these must exist
 try:
     from llm.llmAnalysis import (
-        Config, LLMProvider, OllamaProvider, LMStudioProvider, 
-        GeminiProvider, DeepSeekProvider, EnhancedStockAnalyzer
+        Config, OllamaProvider, LMStudioProvider,
+        GeminiProvider, OpenAIProvider, EnhancedStockAnalyzer
     )
     from data.data_loader import fetch_most_active_stocks
     from utils.utils_report import EmailSender
@@ -92,53 +88,116 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_llm_provider(provider_type: str, config: Config):
+def create_llm_provider(config: Config):
     """
     Create and return the appropriate LLM provider based on type
     
     Args:
-        provider_type: Type of provider ('ollama', 'lmstudio', 'gemini', 'deepseek', 'auto')
+        provider_type: Type of provider ('ollama', 'lmstudio', 'gemini', 'openai', 'auto')
         config: Configuration object
         
     Returns:
         LLMProvider instance
     """
-    if provider_type == 'auto':
-        # Auto-detect based on available configuration
-        if config.gemini_api_key:
-            provider_type = 'gemini'
-            logger.info("Auto-detected: Using Gemini provider")
-        elif config.deepseek_api_key:
-            provider_type = 'deepseek'
-            logger.info("Auto-detected: Using DeepSeek provider")
-        else:
-            # Default to Ollama for local deployment
-            provider_type = 'ollama'
-            logger.info("Auto-detected: Using Ollama provider (default)")
-    
+    provider_type = config.primary_provider_type.lower()
+
     try:
         if provider_type == 'ollama':
-            return OllamaProvider(config=config)
+            return OllamaProvider(
+                model_name=config.primary_model,
+                host=config.ollama_host,
+                config=config
+            )
         elif provider_type == 'lmstudio':
-            return LMStudioProvider(config=config)
+            return LMStudioProvider(
+                model_name=config.primary_model,
+                host=config.lmstudio_host,
+                config=config
+            )
         elif provider_type == 'gemini':
             if not config.gemini_api_key:
-                raise ValueError("Gemini API key not configured. Set GEMINI_API_KEY in .env file.")
-            return GeminiProvider(config=config)
-        elif provider_type == 'deepseek':
-            if not config.deepseek_api_key:
-                raise ValueError("DeepSeek API key not configured. Set DEEPSEEK_API_KEY in .env file.")
-            return DeepSeekProvider(config=config)
+                logger.warning("Gemini API key not configured.")
+                return None
+            return GeminiProvider(
+                api_key=config.gemini_api_key,
+                model_name=config.primary_model,
+                config=config
+            )
+        elif provider_type == 'openai':
+            if not config.openai_api_key:
+                logger.warning("OpenAI API key not configured.")
+                return None
+            return OpenAIProvider(
+                api_key=config.openai_api_key,
+                model_name=config.primary_model,
+                config=config
+            )
         else:
-            raise ValueError(f"Unknown provider type: {provider_type}")
+            logger.warning(f"Unknown primary provider type: {provider_type}.")
+            return None
             
     except Exception as e:
-        logger.error(f"Failed to initialize {provider_type} provider: {e}")
-        logger.info("Falling back to Ollama provider...")
-        return OllamaProvider(config=config)
+        logger.warning(f"Failed to initialize primary {provider_type} provider: {e}")
+        return None
 
 
-def main(provider_type='auto'):
+def create_secondary_llm_provider(config: Config):
+    """
+    Create secondary LLM provider for lightweight tasks like sentiment analysis
+
+    Args:
+        config: Configuration object
+
+    Returns:
+        LLMProvider instance or None if not configured
+    """
+    if not config.use_secondary_provider:
+        return None
+
+    provider_type = config.secondary_provider_type.lower()
+
+    try:
+        if provider_type == 'ollama':
+            return OllamaProvider(
+                model_name=config.secondary_model,
+                host=config.ollama_host,
+                config=config
+            )
+        elif provider_type == 'lmstudio':
+            return LMStudioProvider(
+                model_name=config.secondary_model,
+                host=config.lmstudio_host,
+                config=config
+            )
+        elif provider_type == 'gemini':
+            if not config.gemini_api_key:
+                logger.warning("Gemini API key not configured. Skipping secondary provider.")
+                return None
+            return GeminiProvider(
+                api_key=config.gemini_api_key,
+                model_name=config.secondary_model,
+                config=config
+            )
+        elif provider_type == 'openai':
+            if not config.openai_api_key:
+                logger.warning("OpenAI API key not configured. Skipping secondary provider.")
+                return None
+            return OpenAIProvider(
+                api_key=config.openai_api_key,
+                model_name=config.secondary_model,
+                config=config
+            )
+        else:
+            logger.warning(f"Unknown secondary provider type: {provider_type}. Skipping secondary provider.")
+            return None
+
+    except Exception as e:
+        logger.warning(f"Failed to initialize secondary {provider_type} provider: {e}")
+        logger.info("Continuing with primary provider only...")
+        return None
+
+
+def main():
     """Enhanced main function with prediction tracking"""
     try:
         # Check if .env exists
@@ -161,9 +220,14 @@ def main(provider_type='auto'):
             return
 
         # Initialize the enhanced analyzer with tracking
-        llm_provider = create_llm_provider(provider_type, config)
-        analyzer = EnhancedStockAnalyzer(llm_provider, config)
-        logger.info(f"Initialized analyzer with {type(llm_provider).__name__}")
+        llm_provider = create_llm_provider(config)
+        secondary_llm_provider = create_secondary_llm_provider(config)
+        analyzer = EnhancedStockAnalyzer(llm_provider, config, secondary_llm_provider)
+
+        if secondary_llm_provider:
+            logger.info(f"Initialized analyzer with {type(llm_provider).__name__} (primary) and {type(secondary_llm_provider).__name__} (secondary)")
+        else:
+            logger.info(f"Initialized analyzer with {type(llm_provider).__name__} (primary only)")
         
         # Email configuration
         email_sender = EmailSender(
@@ -223,23 +287,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
     parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
                        default='analyze', help='Operation mode')
-    parser.add_argument('--provider', choices=['auto', 'ollama', 'lmstudio', 'gemini', 'deepseek'],
-                       default='auto', help='LLM provider to use (default: auto-detect)')
     parser.add_argument('--list-providers', action='store_true',
                        help='List available LLM providers and exit')
     args = parser.parse_args()
     
     if args.mode == 'analyze':
-        main(provider_type=args.provider)
+        main()
     elif args.mode == 'reflect':
         from runner.reflection_runner import run_weekly_reflection
-        run_weekly_reflection(provider_type=args.provider)
+        run_weekly_reflection()
     elif args.mode == 'test':
         from runner.reflection_runner import test_prediction_tracking
-        test_prediction_tracking(provider_type=args.provider)
+        test_prediction_tracking()
     elif args.mode == 'options':
         from runner.options_analysis_runner import run_options_analysis
-        run_options_analysis(provider_type=args.provider)
+        run_options_analysis()
     elif args.mode == 'options-reflect':
         from llm.llmOptionsReflection import OptionsLLMReflectionEngine
         from llm.llmOptionsAnalysis import OptionsTracker
@@ -247,7 +309,7 @@ if __name__ == "__main__":
 
         # Initialize configuration and LLM provider
         config = Config()
-        llm_provider = create_llm_provider(args.provider, config)
+        llm_provider = create_llm_provider(config)
 
         # Initialize options components
         db_path = get_project_root() / 'options_predictions.db'

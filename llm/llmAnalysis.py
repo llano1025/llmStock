@@ -93,21 +93,22 @@ class Config:
     sender_password: str = None
     recipient_emails: List[str] = field(default_factory=list)
     
-    # Model settings
-    default_model: str = None
-    predict_window: int = None
-    data_window: int = None
-    algorithm: int = None  # Default algorithm
-    
     # LLM API settings
     ollama_host: str = None
     lmstudio_host: str = None
     gemini_api_key: str = None
-    gemini_model: str = None
-    deepseek_api_key: str = None
-    deepseek_model: str = None
-    deepseek_host: str = None
-    
+    openai_api_key: str = None
+    openai_host: str = None
+
+    # Primary LLM provider settings
+    primary_provider_type: str = None
+    primary_model: str = None
+
+    # Secondary LLM provider settings
+    use_secondary_provider: bool = None
+    secondary_provider_type: str = None
+    secondary_model: str = None
+
     # Consistency control settings
     consistency_mode: bool = None
     llm_temperature: float = None
@@ -169,20 +170,21 @@ class Config:
         recipients_str = os.getenv('RECIPIENT_EMAILS', "")
         self.recipient_emails = [email.strip() for email in recipients_str.split(',') if email.strip()]
         
-        # Model settings
-        self.default_model = os.getenv('DEFAULT_MODEL', "phi4")  # Changed to phi4
-        self.predict_window = int(os.getenv('PREDICT_WINDOW', "48"))
-        self.data_window = int(os.getenv('DATA_WINDOW', "96"))
-        self.algorithm = int(os.getenv('ALGORITHM', "7"))
-        
         # LLM API settings
         self.ollama_host = os.getenv('OLLAMA_HOST', "http://localhost:11434")
         self.lmstudio_host = os.getenv('LMSTUDIO_HOST', "http://localhost:1234/v1")
         self.gemini_api_key = os.getenv('GEMINI_API_KEY', "")
-        self.gemini_model = os.getenv('GEMINI_MODEL', "gemini-pro")
-        self.deepseek_api_key = os.getenv('DEEPSEEK_API_KEY', "")
-        self.deepseek_model = os.getenv('DEEPSEEK_MODEL', "deepseek-chat")
-        self.deepseek_host = os.getenv('DEEPSEEK_HOST', "https://api.deepseek.com")
+        self.openai_api_key = os.getenv('OPENAI_API_KEY', "")
+        self.openai_host = os.getenv('OPENAI_HOST', "https://api.openai.com")
+
+        # Primary LLM provider settings
+        self.primary_provider_type = os.getenv('PRIMARY_PROVIDER_TYPE', 'ollama')
+        self.primary_model = os.getenv('PRIMARY_MODEL', "llama3.1:8b")
+
+        # Secondary LLM provider settings for lightweight tasks
+        self.use_secondary_provider = os.getenv('USE_SECONDARY_PROVIDER', 'false').lower() == 'true'
+        self.secondary_provider_type = os.getenv('SECONDARY_PROVIDER_TYPE', "ollama")
+        self.secondary_model = os.getenv('SECONDARY_MODEL', "llama3.2:3b")
         
         # Consistency control settings
         self.consistency_mode = os.getenv('CONSISTENCY_MODE', 'false').lower() == 'true'
@@ -202,7 +204,7 @@ class Config:
 # ============================
 # REQUIRED CONFIGURATION:
 # 1. Update email settings below with your credentials
-# 2. Choose and configure at least one LLM provider (Ollama, Gemini, or DeepSeek)
+# 2. Choose and configure at least one LLM provider (Ollama, Gemini, or OpenAI)
 # 3. Verify DEFAULT_MODEL matches your chosen LLM provider
 # ============================
 
@@ -220,20 +222,13 @@ SENDER_EMAIL=your-email@gmail.com
 SENDER_PASSWORD=your-app-password
 RECIPIENT_EMAILS=recipient1@example.com,recipient2@example.com
 
-# Model settings
-# ==============
-# DEFAULT_MODEL should match your chosen LLM provider:
-# - For Ollama: use model name like "phi4", "llama3.2:latest", "mistral", etc.
-# - For Gemini: this setting is ignored, uses GEMINI_MODEL instead
-# - For DeepSeek: this setting is ignored, uses DEEPSEEK_MODEL instead
-# - For LM Studio: this setting is ignored, uses whatever model is loaded
-DEFAULT_MODEL=phi4
-PREDICT_WINDOW=48
-DATA_WINDOW=96
-ALGORITHM=7
-
 # LLM API settings - Configure at least one provider
 # ==================================================
+PRIMARY_PROVIDER_TYPE=ollama
+PRIMARY_MODEL=llama3.1:8b
+USE_SECONDARY_PROVIDER=true
+SECONDARY_PROVIDER_TYPE=ollama
+SECONDARY_MODEL=llama3.2:3b
 
 # Option 1: Ollama (Local) - Requires Ollama running locally
 # Download from: https://ollama.com/
@@ -246,13 +241,10 @@ LMSTUDIO_HOST=http://localhost:1234/v1
 # Option 3: Google Gemini (Cloud) - Requires API key from Google AI Studio
 # Get your key at: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-pro
 
-# Option 4: DeepSeek (Cloud) - Requires API key from DeepSeek
-# Get your key at: https://platform.deepseek.com/api_keys
-DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_HOST=https://api.deepseek.com
+# Option 4: openai (Cloud) - Requires API key from openai
+OPENAI_API_KEY=
+OPENAI_HOST=https://api.openai.com
 
 # Consistency Control Settings
 # ============================
@@ -297,7 +289,7 @@ class LLMProvider:
             'ollama': OllamaProvider,
             'lmstudio': LMStudioProvider,
             'gemini': GeminiProvider,
-            'deepseek': DeepSeekProvider
+            'openai': OpenAIProvider
         }
         
         if provider_type.lower() not in providers:
@@ -318,7 +310,7 @@ class OllamaProvider(LLMProvider):
             config: Config object containing settings
         """
         if config:
-            self.model_name = model_name or config.default_model
+            self.model_name = model_name or config.primary_model
             self.host = host or config.ollama_host
             self.config = config  # Store config for consistency settings
         else:
@@ -469,7 +461,7 @@ class GeminiProvider(LLMProvider):
             
         if config:
             self.api_key = api_key or getattr(config, 'gemini_api_key', None) or os.getenv('GEMINI_API_KEY')
-            self.model_name = model_name or getattr(config, 'gemini_model', 'gemini-2.5-flash')
+            self.model_name = model_name or getattr(config, 'primary_model', 'gemini-2.5-flash')
         else:
             self.api_key = api_key or os.getenv('GEMINI_API_KEY')
             self.model_name = model_name or 'gemini-2.5-flash'
@@ -525,36 +517,36 @@ class GeminiProvider(LLMProvider):
             raise Exception(f"Gemini API error: {e}")
 
 
-class DeepSeekProvider(LLMProvider):
-    """DeepSeek provider (using OpenAI-compatible API)"""
+class OpenAIProvider(LLMProvider):
+    """OpenAI provider (using OpenAI-compatible API)"""
     def __init__(self, api_key: str = None, model_name: str = None, base_url: str = None, config: Config = None):
         """
-        Initialize the DeepSeek provider
+        Initialize the OpenAI provider
         
         Args:
-            api_key: DeepSeek API key
-            model_name: DeepSeek model name (default: deepseek-chat)
-            base_url: DeepSeek API base URL
+            api_key: OpenAI API key
+            model_name: OpenAI model name (default: OpenAI-chat)
+            base_url: OpenAI API base URL
             config: Config object containing settings
         """
         if openai is None:
-            raise ImportError("openai package is required for DeepSeek provider. Install with: pip install openai")
+            raise ImportError("openai package is required for OpenAI provider. Install with: pip install openai")
             
         if config:
-            self.api_key = api_key or getattr(config, 'deepseek_api_key', None) or os.getenv('DEEPSEEK_API_KEY')
-            self.model_name = model_name or getattr(config, 'deepseek_model', 'deepseek-chat')
-            self.base_url = base_url or getattr(config, 'deepseek_host', 'https://api.deepseek.com')
+            self.api_key = api_key or getattr(config, 'OpenAI_api_key', None) or os.getenv('OpenAI_API_KEY')
+            self.model_name = model_name or getattr(config, 'primary_model', 'OpenAI-chat')
+            self.base_url = base_url or getattr(config, 'OpenAI_host', 'https://api.openai.com')
             self.config = config  # Store config for consistency settings
         else:
-            self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
-            self.model_name = model_name or 'deepseek-chat'
-            self.base_url = base_url or 'https://api.deepseek.com'
+            self.api_key = api_key or os.getenv('OpenAI_API_KEY')
+            self.model_name = model_name or 'OpenAI-chat'
+            self.base_url = base_url or 'https://api.openai.com'
             self.config = None
             
         if not self.api_key:
-            raise ValueError("DeepSeek API key is required. Set DEEPSEEK_API_KEY environment variable or pass api_key parameter.")
+            raise ValueError("OpenAI API key is required. Set OpenAI_API_KEY environment variable or pass api_key parameter.")
             
-        # Initialize OpenAI client with DeepSeek endpoint
+        # Initialize OpenAI client with OpenAI endpoint
         self.client = openai.OpenAI(
             api_key=self.api_key,
             base_url=self.base_url
@@ -1128,15 +1120,17 @@ Ensure all numeric values are provided as numbers, not strings. Use null for mis
 class StockAnalyzer:
     """Stock analysis and prediction class"""
     
-    def __init__(self, llm_provider: LLMProvider, config: Config = None):
+    def __init__(self, llm_provider: LLMProvider, config: Config = None, secondary_llm_provider: LLMProvider = None):
         """
         Initialize the StockAnalyzer with an LLM provider and configuration
-        
+
         Args:
-            llm_provider: An LLM provider instance
+            llm_provider: Primary LLM provider instance for complex analysis
             config: Configuration settings (optional)
+            secondary_llm_provider: Secondary LLM provider for lightweight tasks like sentiment analysis (optional)
         """
         self.llm = llm_provider
+        self.secondary_llm = secondary_llm_provider  # Use for lightweight tasks like sentiment analysis
         self.config = config or Config()
         
     def get_stock_data(self, ticker: str, period: str = '1y') -> Tuple[pd.DataFrame, Optional[pd.DataFrame], int]:
@@ -1653,7 +1647,9 @@ class StockAnalyzer:
                 "reasoning": "brief explanation"
             }}"""
             
-            relevance_response = self.llm.generate(relevance_prompt)
+            # Use secondary LLM for lightweight relevance checking if available
+            llm_to_use = self.secondary_llm if self.secondary_llm else self.llm
+            relevance_response = llm_to_use.generate(relevance_prompt)
             relevance_result = self._validate_json_response(
                 self._parse_llm_response(relevance_response, response_type='relevance'),
                 response_type='relevance'
@@ -1677,7 +1673,8 @@ class StockAnalyzer:
                 "risk_factors": ["risk1", "risk2"]
             }}"""
             
-            sentiment_response = self.llm.generate(sentiment_prompt)
+            # Use secondary LLM for lightweight sentiment analysis if available
+            sentiment_response = llm_to_use.generate(sentiment_prompt)
             
             analysis = self._validate_json_response(
                 self._parse_llm_response(sentiment_response, response_type='sentiment'),
@@ -2073,8 +2070,8 @@ class StockAnalyzer:
 class EnhancedStockAnalyzer(StockAnalyzer):
     """Enhanced analyzer with prediction tracking and feedback"""
     
-    def __init__(self, llm_provider: LLMProvider, config: Config = None):
-        super().__init__(llm_provider, config)
+    def __init__(self, llm_provider: LLMProvider, config: Config = None, secondary_llm_provider: LLMProvider = None):
+        super().__init__(llm_provider, config, secondary_llm_provider)
         
         # Initialize tracking components
         db_path = get_root_path() / 'predictions.db'

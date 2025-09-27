@@ -493,9 +493,10 @@ def run_options_analysis(provider_type='auto'):
             return
 
         # Create LLM provider and analyzer
-        from main import create_llm_provider
-        llm_provider = create_llm_provider(provider_type, config)
-        analyzer = OptionsAnalyzer(llm_provider, config)
+        from main import create_llm_provider, create_secondary_llm_provider
+        llm_provider = create_llm_provider(config)
+        secondary_llm_provider = create_secondary_llm_provider(config)
+        analyzer = OptionsAnalyzer(llm_provider, config, secondary_llm_provider)
 
         # Initialize email sender
         email_sender = EmailSender(

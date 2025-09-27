@@ -214,8 +214,8 @@ class OptionsDataFetcher:
 class OptionsAnalyzer(EnhancedStockAnalyzer):
     """Enhanced options analyzer with LLM integration and performance tracking"""
 
-    def __init__(self, llm_provider: LLMProvider, config: Config = None):
-        super().__init__(llm_provider, config)
+    def __init__(self, llm_provider: LLMProvider, config: Config = None, secondary_llm_provider: LLMProvider = None):
+        super().__init__(llm_provider, config, secondary_llm_provider)
         self.greeks_calculator = OptionsGreeksCalculator()
         self.data_fetcher = OptionsDataFetcher()
 
@@ -559,7 +559,7 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
             )
 
             # Get LLM recommendations
-            llm_response = self.llm.generate(prompt)
+            llm_response = self.secondary_llm.generate(prompt)
 
             # Parse LLM recommendations into candidate format
             candidates = self._parse_llm_candidate_recommendations(llm_response, options_data, current_price)

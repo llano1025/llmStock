@@ -21,7 +21,7 @@ python-dotenv>=0.19.0
 
 # LLM API clients
 google-genai>=0.3.0  # For Gemini API (new SDK)
-openai>=1.0.0  # For DeepSeek API (OpenAI compatible)
+openai>=1.0.0  # For OpenAI API
 
 # Async support for API calls
 httpx>=0.24.0

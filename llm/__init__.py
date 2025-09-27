@@ -12,7 +12,7 @@ from .llmAnalysis import (
     OllamaProvider,
     LMStudioProvider,
     GeminiProvider,
-    DeepSeekProvider,
+    OpenAIProvider,
     StockAnalyzer,
     EnhancedStockAnalyzer,
     AdvancedTechnicalAnalysis,
@@ -45,7 +45,7 @@ __all__ = [
     'OllamaProvider', 
     'LMStudioProvider',
     'GeminiProvider',
-    'DeepSeekProvider',
+    'OpenAIProvider',
     
     # Analysis classes
     'StockAnalyzer',

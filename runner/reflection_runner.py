@@ -22,9 +22,9 @@ def _create_provider(provider_type: str, config):
         if config.gemini_api_key:
             from llm.llmAnalysis import GeminiProvider
             return GeminiProvider(config=config)
-        elif config.deepseek_api_key:
-            from llm.llmAnalysis import DeepSeekProvider
-            return DeepSeekProvider(config=config)
+        elif config.openai_api_key:
+            from llm.llmAnalysis import OpenAIProvider
+            return OpenAIProvider(config=config)
         else:
             return OllamaProvider(config=config)
     
@@ -37,9 +37,9 @@ def _create_provider(provider_type: str, config):
     elif provider_type == 'gemini':
         from llm.llmAnalysis import GeminiProvider
         return GeminiProvider(config=config)
-    elif provider_type == 'deepseek':
-        from llm.llmAnalysis import DeepSeekProvider
-        return DeepSeekProvider(config=config)
+    elif provider_type == 'openai':
+        from llm.llmAnalysis import OpenAIProvider
+        return OpenAIProvider(config=config)
     else:
         raise ValueError(f"Unknown provider type: {provider_type}")
 
