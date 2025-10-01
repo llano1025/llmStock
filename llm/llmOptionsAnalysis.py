@@ -746,6 +746,113 @@ Provide 2-3 recommendations in valid JSON format. Focus on options that offer th
             logger.debug(f"JSON parsing failed: {e}")
             return []
 
+    def _calculate_macd_signal(self, df: pd.DataFrame) -> str:
+        """Calculate MACD signal interpretation"""
+        try:
+            latest_macd = df.iloc[-1].get('MACD', 0)
+            latest_signal = df.iloc[-1].get('MACD_Signal', 0)
+
+            if pd.isna(latest_macd) or pd.isna(latest_signal):
+                return 'NEUTRAL'
+
+            if latest_macd > latest_signal:
+                return 'BUY'
+            elif latest_macd < latest_signal:
+                return 'SELL'
+            else:
+                return 'NEUTRAL'
+        except Exception as e:
+            logger.debug(f"Error calculating MACD signal: {e}")
+            return 'NEUTRAL'
+
+    def _calculate_bb_position(self, df: pd.DataFrame, current_price: float) -> float:
+        """Calculate position within Bollinger Bands (0-1 scale)"""
+        try:
+            bb_upper = df.iloc[-1].get('BB_Upper')
+            bb_lower = df.iloc[-1].get('BB_Lower')
+
+            if pd.isna(bb_upper) or pd.isna(bb_lower) or bb_upper == bb_lower:
+                return 0.5
+
+            position = (current_price - bb_lower) / (bb_upper - bb_lower)
+            return max(0.0, min(1.0, position))  # Clamp between 0 and 1
+        except Exception as e:
+            logger.debug(f"Error calculating BB position: {e}")
+            return 0.5
+
+    def _calculate_volume_sma_ratio(self, df: pd.DataFrame) -> float:
+        """Calculate volume to SMA ratio"""
+        try:
+            # Try to use existing Volume_Rate field first
+            volume_rate = df.iloc[-1].get('Volume_Rate')
+            if not pd.isna(volume_rate):
+                return float(volume_rate)
+
+            # Calculate directly if Volume_Rate not available
+            current_volume = df.iloc[-1].get('Volume', 0)
+            volume_sma_20 = df['Volume'].rolling(20).mean().iloc[-1]
+
+            if pd.isna(volume_sma_20) or volume_sma_20 == 0:
+                return 1.0
+
+            return float(current_volume / volume_sma_20)
+        except Exception as e:
+            logger.debug(f"Error calculating volume SMA ratio: {e}")
+            return 1.0
+
+    def _extract_sentiment_score(self, sentiment_data: Dict[str, Any]) -> float:
+        """
+        Extract numeric sentiment score from sentiment data dictionary
+
+        Args:
+            sentiment_data: Dictionary containing sentiment analysis results
+
+        Returns:
+            Float sentiment score between -1.0 and 1.0
+        """
+        try:
+            # Check if sentiment_score already exists (backward compatibility)
+            if 'sentiment_score' in sentiment_data:
+                return float(sentiment_data['sentiment_score'])
+
+            # Extract overall_sentiment and confidence
+            overall_sentiment = sentiment_data.get('overall_sentiment', 'neutral')
+            confidence = sentiment_data.get('confidence', 0.0)
+
+            # Validate confidence is a number
+            if not isinstance(confidence, (int, float)) or pd.isna(confidence):
+                confidence = 0.0
+
+            # Convert sentiment string to numeric value
+            sentiment_value = 0.0
+            if isinstance(overall_sentiment, str):
+                sentiment_lower = overall_sentiment.lower().strip()
+                if sentiment_lower in ['positive', 'bullish', 'buy']:
+                    sentiment_value = 1.0
+                elif sentiment_lower in ['negative', 'bearish', 'sell']:
+                    sentiment_value = -1.0
+                elif sentiment_lower in ['neutral', 'hold']:
+                    sentiment_value = 0.0
+                else:
+                    # Unknown sentiment, default to neutral
+                    logger.debug(f"Unknown sentiment value: {overall_sentiment}, defaulting to neutral")
+                    sentiment_value = 0.0
+
+            # Weight sentiment by confidence level
+            sentiment_score = sentiment_value * confidence
+
+            # Clamp to valid range
+            sentiment_score = max(-1.0, min(1.0, sentiment_score))
+
+            logger.debug(f"Extracted sentiment score: {sentiment_score:.3f} "
+                        f"(sentiment: {overall_sentiment}, confidence: {confidence:.3f})")
+
+            return sentiment_score
+
+        except Exception as e:
+            logger.debug(f"Error extracting sentiment score: {e}")
+            return 0.0
+
     def _parse_text_recommendations(self, llm_response: str, options_data: Dict[str, pd.DataFrame],
                                    current_price: float) -> List[Dict[str, Any]]:
         """Fallback text parsing for non-JSON responses"""
@@ -1252,10 +1359,10 @@ Provide valid JSON response with institutional-grade analysis.
             # Get technical indicators dictionary
             technical_indicators = {
                 'RSI_14': df.iloc[-1].get('RSI_14', 50),
-                'MACD_signal': 'NEUTRAL',  # Simplified for now
-                'bb_position': 0.5,  # Simplified for now
+                'MACD_signal': self._calculate_macd_signal(df),
+                'bb_position': self._calculate_bb_position(df, current_price),
                 'current_price': current_price,
-                'volume_sma_ratio': df.iloc[-1].get('volume_sma_ratio', 1.0),
+                'volume_sma_ratio': self._calculate_volume_sma_ratio(df),
                 'price_change_1d': (current_price - df.iloc[-2]['Close']) / df.iloc[-2]['Close'],
                 'volatility_20d': df['Close'].pct_change().rolling(20).std() * np.sqrt(252)
             }
@@ -1279,7 +1386,7 @@ Provide valid JSON response with institutional-grade analysis.
             # Get best options candidates using enhanced method with LLM fallback
             candidates = self.get_best_options_candidates(
                 options_data, current_price, technical_indicators,
-                sentiment_data.get('sentiment_score', 0.0), ticker, sentiment_data
+                self._extract_sentiment_score(sentiment_data), ticker, sentiment_data
             )
 
             if not candidates:
