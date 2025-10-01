@@ -1358,7 +1358,7 @@ Provide valid JSON response with institutional-grade analysis.
 
             # Get technical indicators dictionary
             technical_indicators = {
-                'RSI_14': df.iloc[-1].get('RSI_14', 50),
+                'RSI_14': df.iloc[-1].get('RSI', 50),
                 'MACD_signal': self._calculate_macd_signal(df),
                 'bb_position': self._calculate_bb_position(df, current_price),
                 'current_price': current_price,
