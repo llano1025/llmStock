@@ -271,51 +271,86 @@ class OptionsPerformanceEvaluator(PerformanceEvaluator):
         try:
             conn = sqlite3.connect(self.tracker.db_path)
 
-            # Get performance data
+            # Get performance data - explicitly select columns to avoid duplicates
             perf_df = pd.read_sql_query('''
-                SELECT p.*, op.option_type, op.strike_price, op.days_to_expiration, op.confidence
+                SELECT
+                    p.id, p.prediction_id, p.ticker, p.option_type, p.outcome_date,
+                    p.exit_premium, p.actual_return, p.predicted_return, p.days_held,
+                    p.outcome, p.max_profit_achieved, p.underlying_move, p.iv_change,
+                    p.market_condition,
+                    op.strike_price, op.days_to_expiration, op.confidence
                 FROM options_performance p
                 JOIN options_predictions op ON p.prediction_id = op.id
                 WHERE p.outcome_date >= date('now', '-{} days')
             '''.format(days), conn)
 
             if perf_df.empty:
+                conn.close()
                 return {'message': 'No options performance data available'}
+
+            # Validate required columns exist
+            required_columns = ['option_type', 'actual_return', 'outcome', 'days_to_expiration', 'confidence']
+            missing_columns = [col for col in required_columns if col not in perf_df.columns]
+            if missing_columns:
+                conn.close()
+                logger.error(f"Missing required columns: {missing_columns}")
+                return {'error': f'Missing required columns: {missing_columns}'}
 
             # Overall metrics
             total_predictions = len(perf_df)
-            success_rate = len(perf_df[perf_df['outcome'] == 'SUCCESS']) / total_predictions
+            success_rate = len(perf_df[perf_df['outcome'] == 'SUCCESS']) / total_predictions if total_predictions > 0 else 0
             avg_return = perf_df['actual_return'].mean()
 
             # Performance by option type
-            type_performance = perf_df.groupby('option_type').agg({
-                'actual_return': ['mean', 'count'],
-                'outcome': lambda x: (x == 'SUCCESS').mean()
-            }).round(3)
+            type_performance = {}
+            if 'option_type' in perf_df.columns and len(perf_df) > 0:
+                type_performance = perf_df.groupby('option_type', as_index=True).agg({
+                    'actual_return': ['mean', 'count'],
+                    'outcome': lambda x: (x == 'SUCCESS').mean()
+                }).round(3)
 
             # Performance by expiration
-            exp_performance = perf_df.groupby('days_to_expiration').agg({
-                'actual_return': ['mean', 'count'],
-                'outcome': lambda x: (x == 'SUCCESS').mean()
-            }).round(3)
+            exp_performance = {}
+            if 'days_to_expiration' in perf_df.columns and len(perf_df) > 0:
+                exp_performance = perf_df.groupby('days_to_expiration', as_index=True).agg({
+                    'actual_return': ['mean', 'count'],
+                    'outcome': lambda x: (x == 'SUCCESS').mean()
+                }).round(3)
 
             # Performance by confidence
-            conf_performance = perf_df.groupby('confidence').agg({
-                'actual_return': ['mean', 'count'],
-                'outcome': lambda x: (x == 'SUCCESS').mean()
-            }).round(3)
+            conf_performance = {}
+            if 'confidence' in perf_df.columns and len(perf_df) > 0:
+                conf_performance = perf_df.groupby('confidence', as_index=True).agg({
+                    'actual_return': ['mean', 'count'],
+                    'outcome': lambda x: (x == 'SUCCESS').mean()
+                }).round(3)
 
             conn.close()
+
+            # Safely extract best performing metrics
+            best_performing_expiration = None
+            if isinstance(exp_performance, pd.DataFrame) and not exp_performance.empty:
+                try:
+                    best_performing_expiration = exp_performance['actual_return']['mean'].idxmax()
+                except:
+                    pass
+
+            best_performing_type = None
+            if isinstance(type_performance, pd.DataFrame) and not type_performance.empty:
+                try:
+                    best_performing_type = type_performance['actual_return']['mean'].idxmax()
+                except:
+                    pass
 
             return {
                 'total_predictions': total_predictions,
                 'success_rate': round(success_rate, 3),
                 'average_return': round(avg_return, 3),
-                'performance_by_type': type_performance.to_dict(),
-                'performance_by_expiration': exp_performance.to_dict(),
-                'performance_by_confidence': conf_performance.to_dict(),
-                'best_performing_expiration': exp_performance['actual_return']['mean'].idxmax() if not exp_performance.empty else None,
-                'best_performing_type': type_performance['actual_return']['mean'].idxmax() if not type_performance.empty else None
+                'performance_by_type': type_performance.to_dict() if isinstance(type_performance, pd.DataFrame) else {},
+                'performance_by_expiration': exp_performance.to_dict() if isinstance(exp_performance, pd.DataFrame) else {},
+                'performance_by_confidence': conf_performance.to_dict() if isinstance(conf_performance, pd.DataFrame) else {},
+                'best_performing_expiration': best_performing_expiration,
+                'best_performing_type': best_performing_type
             }
 
         except Exception as e:
