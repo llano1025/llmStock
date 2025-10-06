@@ -228,6 +228,312 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
             db_path = Path.cwd() / 'options_predictions.db'
         self.options_tracker = OptionsTracker(db_path)
 
+    def _calculate_weighted_directional_bias(self, technical_indicators: Dict[str, float],
+                                            sentiment_score: float) -> Tuple[str, str, float]:
+        """
+        Calculate directional bias using weighted multi-indicator analysis
+
+        Args:
+            technical_indicators: Dictionary of technical analysis values
+            sentiment_score: News sentiment score
+
+        Returns:
+            Tuple of (primary_bias, secondary_bias, confidence_score)
+        """
+        bullish_score = 0.0
+        bearish_score = 0.0
+
+        # Get trend strength for confidence weighting
+        adx = technical_indicators.get('ADX', 25)
+        trend_strength_multiplier = min(adx / 25, 2.0)  # Cap at 2x
+
+        # RSI with weighted scoring (higher weight when extreme)
+        rsi = technical_indicators.get('RSI_14', 50)
+        if rsi < 20:
+            bullish_score += 2.0  # Strong oversold
+        elif rsi < 30:
+            bullish_score += 1.5  # Oversold
+        elif rsi < 40:
+            bullish_score += 0.5  # Mildly bullish
+        elif rsi > 80:
+            bearish_score += 2.0  # Strong overbought
+        elif rsi > 70:
+            bearish_score += 1.5  # Overbought
+        elif rsi > 60:
+            bearish_score += 0.5  # Mildly bearish
+
+        # Stochastic confirmation
+        stoch_k = technical_indicators.get('Stoch_K', 50)
+        if stoch_k < 20:
+            bullish_score += 1.0
+        elif stoch_k > 80:
+            bearish_score += 1.0
+
+        # Money Flow Index (volume-weighted momentum)
+        mfi = technical_indicators.get('MFI', 50)
+        if mfi < 20:
+            bullish_score += 1.5  # Strong money inflow opportunity
+        elif mfi < 30:
+            bullish_score += 1.0
+        elif mfi > 80:
+            bearish_score += 1.5  # Strong money outflow
+        elif mfi > 70:
+            bearish_score += 1.0
+
+        # MACD with magnitude consideration
+        macd = technical_indicators.get('MACD', 0)
+        macd_signal_val = technical_indicators.get('MACD_Signal', 0)
+        macd_diff = macd - macd_signal_val
+        if macd_diff > 0:
+            bullish_score += min(abs(macd_diff) * 10, 2.0)  # Scale and cap
+        else:
+            bearish_score += min(abs(macd_diff) * 10, 2.0)
+
+        # Directional indicators (DI+/DI-)
+        di_plus = technical_indicators.get('DI_plus', 25)
+        di_minus = technical_indicators.get('DI_minus', 25)
+        di_diff = di_plus - di_minus
+        if di_diff > 0:
+            bullish_score += min(di_diff / 25, 2.0)
+        else:
+            bearish_score += min(abs(di_diff) / 25, 2.0)
+
+        # Bollinger Bands position with weighted extremes
+        bb_position = technical_indicators.get('bb_position', 0.5)
+        if bb_position < 0.1:
+            bullish_score += 2.0  # Extreme lower band
+        elif bb_position < 0.2:
+            bullish_score += 1.5
+        elif bb_position < 0.3:
+            bullish_score += 0.5
+        elif bb_position > 0.9:
+            bearish_score += 2.0  # Extreme upper band
+        elif bb_position > 0.8:
+            bearish_score += 1.5
+        elif bb_position > 0.7:
+            bearish_score += 0.5
+
+        # Volume confirmation (high volume confirms the trend)
+        volume_ratio = technical_indicators.get('volume_sma_ratio', 1.0)
+        if volume_ratio > 1.5:
+            trend_strength_multiplier *= 1.2
+        elif volume_ratio > 2.0:
+            trend_strength_multiplier *= 1.4
+
+        # Price momentum
+        price_change = technical_indicators.get('price_change_1d', 0)
+        if price_change > 0.03:  # +3% strong move
+            bullish_score += min(price_change * 20, 3.0)
+        elif price_change > 0.01:  # +1% moderate move
+            bullish_score += price_change * 10
+        elif price_change < -0.03:  # -3% strong drop
+            bearish_score += min(abs(price_change) * 20, 3.0)
+        elif price_change < -0.01:  # -1% moderate drop
+            bearish_score += abs(price_change) * 10
+
+        # Sentiment overlay
+        if sentiment_score > 0.3:
+            bullish_score += sentiment_score * 3
+        elif sentiment_score > 0.1:
+            bullish_score += sentiment_score * 2
+        elif sentiment_score < -0.3:
+            bearish_score += abs(sentiment_score) * 3
+        elif sentiment_score < -0.1:
+            bearish_score += abs(sentiment_score) * 2
+
+        # Apply trend strength multiplier
+        bullish_score *= trend_strength_multiplier
+        bearish_score *= trend_strength_multiplier
+
+        # Market regime adjustment - reduce confidence in ranging markets
+        market_regime = technical_indicators.get('Market_Regime', 'Developing')
+        if market_regime == 'Ranging':
+            bullish_score *= 0.5
+            bearish_score *= 0.5
+
+        # Determine primary and secondary bias
+        total_score = bullish_score + bearish_score
+        confidence = abs(bullish_score - bearish_score) / max(total_score, 1.0)
+
+        if bullish_score > bearish_score * 1.2:  # Require 20% margin for clear bias
+            primary_bias = 'BULLISH'
+            secondary_bias = 'BEARISH'
+        elif bearish_score > bullish_score * 1.2:
+            primary_bias = 'BEARISH'
+            secondary_bias = 'BULLISH'
+        else:
+            primary_bias = 'NEUTRAL'
+            secondary_bias = 'NEUTRAL'
+
+        logger.debug(f"Directional bias: {primary_bias} (bullish={bullish_score:.2f}, bearish={bearish_score:.2f}, confidence={confidence:.2%})")
+
+        return primary_bias, secondary_bias, confidence
+
+    def _get_dynamic_strike_ranges(self, current_price: float, option_type: str,
+                                   volatility: float) -> Dict[str, Tuple[float, float]]:
+        """
+        Calculate dynamic strike ranges based on current volatility
+
+        Args:
+            current_price: Current stock price
+            option_type: 'CALL' or 'PUT'
+            volatility: Annualized volatility
+
+        Returns:
+            Dictionary mapping strike_type to (lower_bound, upper_bound) tuples
+        """
+        # Defensive conversion: ensure volatility is native float
+        if hasattr(volatility, 'item'):
+            volatility = float(volatility.item())
+        else:
+            volatility = float(volatility) if volatility is not None else 0.3
+
+        # Adjust ranges based on volatility (higher vol = wider ranges)
+        vol_multiplier = max(1.0, min(volatility * 2.5, 2.5))
+
+        base_atm_range = 0.02  # ±2% for ATM
+        base_itm_range = 0.05  # 5% for ITM
+        base_otm_range = 0.10  # 10% for OTM
+
+        if option_type == 'CALL':
+            return {
+                'ATM': (current_price * (1 - base_atm_range),
+                       current_price * (1 + base_atm_range)),
+                'ITM': (current_price * (1 - base_itm_range * vol_multiplier),
+                       current_price * (1 - base_atm_range)),
+                'OTM': (current_price * (1 + base_atm_range),
+                       current_price * (1 + base_otm_range * vol_multiplier))
+            }
+        else:  # PUT
+            return {
+                'ATM': (current_price * (1 - base_atm_range),
+                       current_price * (1 + base_atm_range)),
+                'ITM': (current_price * (1 + base_atm_range),
+                       current_price * (1 + base_itm_range * vol_multiplier)),
+                'OTM': (current_price * (1 - base_otm_range * vol_multiplier),
+                       current_price * (1 - base_atm_range))
+            }
+
+    def _calculate_risk_adjusted_score(self, candidate: Dict[str, Any],
+                                       historical_volatility: float,
+                                       underlying_price: float) -> float:
+        """
+        Apply risk adjustments to option candidate score
+
+        Args:
+            candidate: Option candidate dictionary with score
+            historical_volatility: Historical volatility for comparison
+            underlying_price: Current price of the underlying stock
+
+        Returns:
+            Risk-adjusted score multiplier (0.5 to 1.5 range)
+        """
+        # Helper function to safely convert pandas scalars to Python floats
+        def to_float(value, default=0.0):
+            """Convert pandas scalars, None, and other types to native Python float"""
+            if value is None:
+                return default
+            if hasattr(value, 'item'):  # pandas scalar
+                return float(value.item())
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return default
+
+        risk_multiplier = 1.0
+
+        # Convert ALL candidate values to native Python types upfront
+        iv = to_float(candidate.get('implied_volatility', 0.3), 0.3)
+        days_to_exp = to_float(candidate.get('days_to_expiration', 30), 30)
+        spread_ratio = to_float(candidate.get('spread_ratio', 0.1), 0.1)
+        volume = to_float(candidate.get('volume', 0), 0.0)
+        oi = to_float(candidate.get('open_interest', 0), 0.0)
+        strike = to_float(candidate.get('strike', 0), 0.0)
+        option_type = candidate.get('option_type', 'CALL')
+
+        # IV vs HV comparison (IV Rank proxy) - ensure result is also native float
+        iv_hv_ratio = float(iv / max(historical_volatility, 0.01))
+
+        if iv_hv_ratio > 1.8:
+            # Very high IV relative to HV - expensive options
+            risk_multiplier *= 0.7
+            logger.debug(f"High IV penalty: IV/HV={iv_hv_ratio:.2f}")
+        elif iv_hv_ratio > 1.3:
+            # Moderately high IV
+            risk_multiplier *= 0.85
+        elif iv_hv_ratio < 0.7:
+            # Low IV relative to HV - cheap options
+            risk_multiplier *= 1.3
+            logger.debug(f"Low IV bonus: IV/HV={iv_hv_ratio:.2f}")
+        elif iv_hv_ratio < 0.9:
+            # Moderately low IV
+            risk_multiplier *= 1.15
+
+        # Theta decay risk based on days to expiration
+        if days_to_exp < 7:
+            # Very short-term: extreme theta decay
+            risk_multiplier *= 0.6
+            logger.debug(f"Extreme theta penalty: {days_to_exp} days")
+        elif days_to_exp < 14:
+            # Short-term: high theta decay zone
+            risk_multiplier *= 0.8
+        elif days_to_exp < 21:
+            # 2-3 weeks: moderate theta
+            risk_multiplier *= 0.9
+        elif 28 <= days_to_exp <= 45:
+            # Sweet spot: 4-6 weeks optimal for theta/gamma balance
+            risk_multiplier *= 1.2
+            logger.debug(f"Optimal time window bonus: {days_to_exp} days")
+        elif days_to_exp > 90:
+            # Long-dated: less theta risk but more capital/time commitment
+            risk_multiplier *= 1.05
+
+        # Liquidity risk from bid-ask spread
+        if spread_ratio > 0.3:  # Wide spread > 30%
+            risk_multiplier *= 0.7
+        elif spread_ratio > 0.15:  # Moderate spread
+            risk_multiplier *= 0.85
+        elif spread_ratio < 0.05:  # Very tight spread
+            risk_multiplier *= 1.1
+
+        # Volume/OI liquidity check
+        if volume < 5 and oi < 50:
+            # Very low liquidity
+            risk_multiplier *= 0.6
+        elif volume < 10 and oi < 100:
+            # Low liquidity
+            risk_multiplier *= 0.8
+
+        # Moneyness consideration (strike vs underlying stock price)
+
+        if option_type == 'CALL':
+            moneyness = strike / max(underlying_price, 1)
+            if moneyness < 0.90:
+                # Deep ITM - less leverage, more like stock
+                risk_multiplier *= 0.9
+            elif 0.98 <= moneyness <= 1.02:
+                # ATM - optimal gamma/theta balance
+                risk_multiplier *= 1.1
+            elif moneyness > 1.15:
+                # Far OTM - lottery ticket
+                risk_multiplier *= 0.7
+        else:  # PUT
+            moneyness = strike / max(underlying_price, 1)
+            if moneyness > 1.10:
+                # Deep ITM put
+                risk_multiplier *= 0.9
+            elif 0.98 <= moneyness <= 1.02:
+                # ATM
+                risk_multiplier *= 1.1
+            elif moneyness < 0.85:
+                # Far OTM put
+                risk_multiplier *= 0.7
+
+        # Clamp the final multiplier to reasonable range
+        risk_multiplier = max(0.5, min(risk_multiplier, 1.5))
+
+        return risk_multiplier
+
     def get_best_options_candidates(self, options_data: Dict[str, pd.DataFrame],
                                   current_price: float, technical_indicators: Dict[str, float],
                                   sentiment_score: float, ticker: str = None, sentiment_data: Dict[str, Any] = None) -> List[Dict[str, Any]]:
@@ -245,45 +551,21 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
         """
         candidates = []
 
-        # Get trend direction from technical indicators
-        rsi = technical_indicators.get('RSI_14', 50)
-        macd_signal = technical_indicators.get('MACD_signal', 'NEUTRAL')
-        bb_position = technical_indicators.get('bb_position', 0.5)  # 0-1 scale within Bollinger Bands
+        # Use enhanced weighted directional bias calculation
+        primary_bias, secondary_bias, bias_confidence = self._calculate_weighted_directional_bias(
+            technical_indicators, sentiment_score
+        )
 
-        # Determine directional bias
-        bullish_signals = 0
-        bearish_signals = 0
-
-        if rsi < 30:
-            bullish_signals += 1
-        elif rsi > 70:
-            bearish_signals += 1
-
-        if macd_signal == 'BUY':
-            bullish_signals += 1
-        elif macd_signal == 'SELL':
-            bearish_signals += 1
-
-        if sentiment_score > 0.1:
-            bullish_signals += 1
-        elif sentiment_score < -0.1:
-            bearish_signals += 1
-
-        if bb_position < 0.2:
-            bullish_signals += 1
-        elif bb_position > 0.8:
-            bearish_signals += 1
-
-        # Determine primary bias
-        if bullish_signals > bearish_signals:
-            primary_bias = 'BULLISH'
-            secondary_bias = 'BEARISH'
-        elif bearish_signals > bullish_signals:
-            primary_bias = 'BEARISH'
-            secondary_bias = 'BULLISH'
+        # Get volatility for dynamic strike ranges - ensure it's a native float
+        volatility = technical_indicators.get('volatility_20d', 0.3)
+        # Defensive conversion in case it's still a pandas scalar
+        if hasattr(volatility, 'item'):
+            volatility = float(volatility.item())
         else:
-            primary_bias = 'NEUTRAL'
-            secondary_bias = 'NEUTRAL'
+            volatility = float(volatility) if volatility is not None else 0.3
+
+        # Track seen options to prevent duplicates
+        seen_options = set()
 
         # Analyze each expiration
         for exp_date, df in options_data.items():
@@ -360,40 +642,60 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
                 if type_df.empty:
                     continue
 
+                # Get dynamic strike ranges based on volatility
+                strike_ranges = self._get_dynamic_strike_ranges(current_price, option_type, volatility)
+
                 # Find optimal strikes based on liquidity and Greeks potential
                 for strike_type in ['ATM', 'ITM', 'OTM']:
-                    if strike_type == 'ATM':
-                        target_strikes = type_df[abs(type_df['strike'] - current_price) <= 0.02 * current_price]
-                    elif strike_type == 'ITM':
-                        if option_type == 'CALL':
-                            target_strikes = type_df[(type_df['strike'] < current_price) &
-                                                   (type_df['strike'] >= current_price * 0.95)]
-                        else:
-                            target_strikes = type_df[(type_df['strike'] > current_price) &
-                                                   (type_df['strike'] <= current_price * 1.05)]
-                    else:  # OTM
-                        if option_type == 'CALL':
-                            target_strikes = type_df[(type_df['strike'] > current_price) &
-                                                   (type_df['strike'] <= current_price * 1.1)]
-                        else:
-                            target_strikes = type_df[(type_df['strike'] < current_price) &
-                                                   (type_df['strike'] >= current_price * 0.9)]
+                    lower_bound, upper_bound = strike_ranges[strike_type]
+                    target_strikes = type_df[(type_df['strike'] >= lower_bound) &
+                                           (type_df['strike'] <= upper_bound)].copy()
 
                     if target_strikes.empty:
                         continue
 
-                    # Select best candidate based on volume and bid-ask spread
+                    # Calculate bid-ask spread metrics
                     target_strikes['bid_ask_spread'] = target_strikes['ask'] - target_strikes['bid']
                     target_strikes['spread_ratio'] = target_strikes['bid_ask_spread'] / target_strikes['bid'].clip(lower=0.01)
 
-                    # Prefer high volume, low spread options
-                    target_strikes['score'] = (target_strikes['volume'].fillna(0) * 0.4 +
-                                             target_strikes['openInterest'].fillna(0) * 0.3 -
-                                             target_strikes['spread_ratio'] * 1000 * 0.3)
+                    # Normalize volume and open interest for fair comparison
+                    max_vol = target_strikes['volume'].fillna(0).max()
+                    max_oi = target_strikes['openInterest'].fillna(0).max()
+
+                    target_strikes['norm_volume'] = target_strikes['volume'].fillna(0) / max(max_vol, 1)
+                    target_strikes['norm_oi'] = target_strikes['openInterest'].fillna(0) / max(max_oi, 1)
+                    target_strikes['norm_spread'] = target_strikes['spread_ratio'].clip(upper=0.5)
+
+                    # Time value consideration (favor mid-term over very short or very long)
+                    optimal_days = 30
+                    target_strikes['time_score'] = 1.0 / (1 + abs(days_to_exp - optimal_days) / optimal_days)
+
+                    # Enhanced composite score with normalized values
+                    target_strikes['score'] = (
+                        target_strikes['norm_volume'] * 0.30 +           # Liquidity importance
+                        target_strikes['norm_oi'] * 0.25 +               # Open interest stability
+                        (1 - target_strikes['norm_spread']) * 0.25 +     # Tight spread is better
+                        target_strikes['time_score'] * 0.20              # Optimal time to expiration
+                    )
+
+                    # Apply bias confidence weighting
+                    target_strikes['score'] *= (0.5 + bias_confidence * 0.5)  # Scale by confidence
 
                     best_option = target_strikes.loc[target_strikes['score'].idxmax()]
 
-                    candidates.append({
+                    # Create unique key to prevent duplicates
+                    option_key = (exp_date, option_type, round(best_option['strike'], 2))
+
+                    # Skip if this exact option has already been added
+                    if option_key in seen_options:
+                        logger.debug(f"Skipping duplicate option: {option_type} ${best_option['strike']:.2f} {exp_date}")
+                        continue
+
+                    # Mark this option as seen
+                    seen_options.add(option_key)
+
+                    # Create candidate dictionary
+                    candidate = {
                         'expiration_date': exp_date,
                         'days_to_expiration': days_to_exp,
                         'option_type': option_type,
@@ -405,40 +707,49 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
                         'ask': best_option['ask'],
                         'volume': best_option['volume'],
                         'open_interest': best_option['openInterest'],
-                        'implied_volatility': best_option['impliedVolatility']
-                    })
+                        'implied_volatility': best_option['impliedVolatility'],
+                        'score': best_option['score'],
+                        'spread_ratio': best_option['spread_ratio']
+                    }
 
-        # Sort by score and return top candidates
-        technical_candidates = sorted(candidates, key=lambda x: x['volume'] * x['open_interest'], reverse=True)[:10]
+                    # Apply risk-adjusted scoring (pass underlying stock price, not option premium)
+                    risk_multiplier = self._calculate_risk_adjusted_score(candidate, volatility, current_price)
+                    candidate['final_score'] = candidate['score'] * risk_multiplier
+                    candidate['risk_multiplier'] = risk_multiplier
+
+                    candidates.append(candidate)
+
+        # Sort by final risk-adjusted score and return top candidates
+        technical_candidates = sorted(candidates, key=lambda x: x.get('final_score', 0), reverse=True)[:10]
 
         # If we found good technical candidates, return them
         if technical_candidates:
             logger.debug(f"Found {len(technical_candidates)} candidates using technical analysis")
             return technical_candidates
 
-        # LLM fallback: if no technical candidates found, use LLM intelligence
-        if ticker and sentiment_data is not None:
-            logger.info(f"No technical candidates found for {ticker}, trying LLM-assisted selection")
-            llm_candidates = self._llm_assisted_candidate_selection(
-                options_data, current_price, technical_indicators, sentiment_data, ticker
-            )
+        # # LLM fallback: if no technical candidates found, use LLM intelligence
+        # if ticker and sentiment_data is not None:
+        #     logger.info(f"No technical candidates found for {ticker}, trying LLM-assisted selection")
+        #     llm_candidates = self._llm_assisted_candidate_selection(
+        #         options_data, current_price, technical_indicators, sentiment_data, ticker
+        #     )
 
-            if llm_candidates:
-                logger.info(f"LLM fallback found {len(llm_candidates)} candidates for {ticker}")
-                return llm_candidates
+        #     if llm_candidates:
+        #         logger.info(f"LLM fallback found {len(llm_candidates)} candidates for {ticker}")
+        #         return llm_candidates
 
-        logger.warning(f"No options candidates found for {ticker} using technical or LLM methods")
+        # logger.warning(f"No options candidates found for {ticker} using technical or LLM methods")
 
-        # Emergency fallback: Create basic ATM options if no candidates found
-        logger.info(f"Attempting emergency options selection for {ticker}")
-        emergency_candidates = self._create_emergency_options_candidates(options_data, current_price, technical_indicators)
+        # # # Emergency fallback: Create basic ATM options if no candidates found
+        # logger.info(f"Attempting emergency options selection for {ticker}")
+        # emergency_candidates = self._create_emergency_options_candidates(options_data, current_price, technical_indicators)
 
-        if emergency_candidates:
-            logger.info(f"Emergency fallback found {len(emergency_candidates)} basic options for {ticker}")
-            return emergency_candidates
+        # if emergency_candidates:
+        #     logger.info(f"Emergency fallback found {len(emergency_candidates)} basic options for {ticker}")
+        #     return emergency_candidates
 
-        logger.error(f"Complete failure: No options candidates found for {ticker} even with emergency fallback")
-        return []
+        # logger.error(f"Complete failure: No options candidates found for {ticker} even with emergency fallback")
+        # return []
 
     def _create_emergency_options_candidates(self, options_data: Dict[str, pd.DataFrame],
                                            current_price: float, technical_indicators: Dict[str, float]) -> List[Dict[str, Any]]:
@@ -1356,15 +1667,28 @@ Provide valid JSON response with institutional-grade analysis.
             df = AdvancedTechnicalAnalysis.calculate_comprehensive_indicators(df)
             current_price = df.iloc[-1]['Close']
 
-            # Get technical indicators dictionary
+            # Get comprehensive technical indicators dictionary
+            # Convert pandas scalars to native Python types to avoid ambiguous truth value errors
+            volatility_series = df['Close'].pct_change().rolling(20).std() * np.sqrt(252)
+            volatility_value = float(volatility_series.iloc[-1]) if not pd.isna(volatility_series.iloc[-1]) else 0.3
+
             technical_indicators = {
                 'RSI_14': df.iloc[-1].get('RSI', 50),
-                'MACD_signal': self._calculate_macd_signal(df),
+                'MACD': df.iloc[-1].get('MACD', 0),
+                'MACD_Signal': df.iloc[-1].get('MACD_Signal', 0),
+                'MACD_signal': self._calculate_macd_signal(df),  # Keep legacy field
                 'bb_position': self._calculate_bb_position(df, current_price),
                 'current_price': current_price,
                 'volume_sma_ratio': self._calculate_volume_sma_ratio(df),
                 'price_change_1d': (current_price - df.iloc[-2]['Close']) / df.iloc[-2]['Close'],
-                'volatility_20d': df['Close'].pct_change().rolling(20).std() * np.sqrt(252)
+                'volatility_20d': volatility_value,  # Native float, not pandas scalar
+                # Additional indicators for enhanced bias calculation
+                'ADX': df.iloc[-1].get('ADX', 25),
+                'Stoch_K': df.iloc[-1].get('Stoch_K', 50),
+                'MFI': df.iloc[-1].get('MFI', 50),
+                'DI_plus': df.iloc[-1].get('DI_plus', 25),
+                'DI_minus': df.iloc[-1].get('DI_minus', 25),
+                'Market_Regime': str(df.iloc[-1].get('Market_Regime', 'Developing'))
             }
 
             # Get news sentiment
@@ -1390,8 +1714,10 @@ Provide valid JSON response with institutional-grade analysis.
             )
 
             if not candidates:
-                logger.warning(f"No suitable options candidates found for {ticker}")
+                logger.warning(f"No suitable options candidates found for {ticker} - skipping ticker")
                 return []
+
+            logger.info(f"Found {len(candidates)} options candidates for {ticker}, proceeding with LLM analysis")
 
             # Generate LLM analysis and predictions
             predictions = self.get_options_llm_analysis(
