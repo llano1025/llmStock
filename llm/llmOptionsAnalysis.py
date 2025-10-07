@@ -720,7 +720,7 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
                     candidates.append(candidate)
 
         # Sort by final risk-adjusted score and return top candidates
-        technical_candidates = sorted(candidates, key=lambda x: x.get('final_score', 0), reverse=True)[:3]
+        technical_candidates = sorted(candidates, key=lambda x: x.get('final_score', 0), reverse=True)[:5]
 
         # If we found good technical candidates, return them
         if technical_candidates:
