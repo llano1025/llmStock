@@ -600,6 +600,207 @@ Market Regime Analysis:
         conn.commit()
         conn.close()
 
+    def _extract_improvements_from_reflection(self, reflection_text: str) -> str:
+        """
+        Extract actionable improvements from LLM reflection text.
+
+        Tries multiple extraction strategies:
+        1. Parse as JSON and extract 'improvements' key
+        2. Use regex to find IMPROVEMENTS/RECOMMENDATIONS sections
+        3. Fallback to returning the full text
+
+        Args:
+            reflection_text: The raw reflection text from the LLM
+
+        Returns:
+            str: Extracted improvements text
+        """
+        if not reflection_text or not reflection_text.strip():
+            return "No specific improvements identified from reflection."
+
+        import json
+        import re
+
+        # Strategy 1: Try to parse as JSON
+        try:
+            # Clean potential markdown code blocks
+            cleaned_text = reflection_text.strip()
+            if cleaned_text.startswith('```'):
+                # Remove markdown code fence
+                cleaned_text = re.sub(r'^```(?:json)?\s*', '', cleaned_text)
+                cleaned_text = re.sub(r'```\s*$', '', cleaned_text)
+
+            reflection_data = json.loads(cleaned_text)
+
+            # Extract improvements from various possible keys
+            if isinstance(reflection_data, dict):
+                improvements = (
+                    reflection_data.get('improvements') or
+                    reflection_data.get('IMPROVEMENTS') or
+                    reflection_data.get('recommendations') or
+                    reflection_data.get('RECOMMENDATIONS') or
+                    reflection_data.get('action_items') or
+                    reflection_data.get('key_learnings')
+                )
+
+                if improvements:
+                    # If it's a list, join into string
+                    if isinstance(improvements, list):
+                        return '\n- ' + '\n- '.join(str(item) for item in improvements)
+                    return str(improvements)
+
+        except (json.JSONDecodeError, ValueError):
+            pass  # Not JSON, try other strategies
+
+        # Strategy 2: Regex extraction of IMPROVEMENTS section
+        patterns = [
+            r'(?:IMPROVEMENTS?|RECOMMENDATIONS?):\s*\n(.*?)(?:\n\n|$)',
+            r'(?:## IMPROVEMENTS?|## RECOMMENDATIONS?)\s*\n(.*?)(?:\n##|$)',
+            r'(?:2\.\s*IMPROVEMENTS?|2\.\s*RECOMMENDATIONS?):\s*\n(.*?)(?:\n\d+\.|$)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, reflection_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                improvements = match.group(1).strip()
+                if improvements and len(improvements) > 20:  # Minimum length check
+                    return improvements
+
+        # Strategy 3: Look for bullet points or numbered lists after keywords
+        improvement_keywords = r'(?:improve|recommend|suggest|should|consider|optimize|enhance|adjust)'
+        lines = reflection_text.split('\n')
+
+        improvement_lines = []
+        in_improvement_section = False
+
+        for line in lines:
+            line = line.strip()
+            # Check if line starts improvement section
+            if re.search(r'(?:IMPROVEMENT|RECOMMENDATION|ACTION)', line, re.IGNORECASE):
+                in_improvement_section = True
+                continue
+
+            # Stop if we hit another major section
+            if in_improvement_section and re.match(r'^(?:\d+\.|\w+:|\#\#)', line):
+                if not re.search(improvement_keywords, line, re.IGNORECASE):
+                    break
+
+            # Collect improvement lines
+            if in_improvement_section or re.search(improvement_keywords, line, re.IGNORECASE):
+                if line and (line.startswith('-') or line.startswith('•') or
+                           line.startswith('*') or re.match(r'^\d+\.', line)):
+                    improvement_lines.append(line)
+
+        if improvement_lines:
+            return '\n'.join(improvement_lines)
+
+        # Strategy 4: Fallback - return second half of text (improvements usually come after reflection)
+        sentences = reflection_text.split('. ')
+        if len(sentences) > 3:
+            midpoint = len(sentences) // 2
+            improvements = '. '.join(sentences[midpoint:])
+            if improvements:
+                return improvements.strip()
+
+        # Last resort: return full text with a note
+        return f"[Full reflection - improvements embedded]\n\n{reflection_text[:500]}..."
+
+    def get_enhanced_options_analysis_prompt(self, base_prompt: str, ticker: str, config=None) -> str:
+        """
+        Enhance options analysis prompt with historical options performance insights.
+
+        Retrieves past options performance for the ticker and injects key learnings
+        and improvements into the analysis prompt, enabling continuous self-improvement.
+
+        Args:
+            base_prompt: The base options analysis prompt
+            ticker: Stock ticker symbol
+            config: Configuration object (optional)
+
+        Returns:
+            str: Enhanced prompt with historical performance context
+        """
+        enhanced_prompt = base_prompt
+
+        # Check if historical context is enabled
+        if config and not getattr(config, 'use_historical_context', True):
+            return enhanced_prompt
+
+        # Get most recent options feedback from database
+        conn = sqlite3.connect(self.tracker.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM options_llm_feedback
+            WHERE ticker = ?
+            ORDER BY feedback_date DESC
+            LIMIT 1
+        ''', (ticker,))
+
+        recent_feedback = cursor.fetchone()
+
+        if recent_feedback:
+            columns = [description[0] for description in cursor.description]
+            feedback_dict = dict(zip(columns, recent_feedback))
+
+            # Parse JSON fields
+            try:
+                success_rate_by_type = json.loads(feedback_dict['success_rate_by_type']) if isinstance(feedback_dict['success_rate_by_type'], str) else feedback_dict['success_rate_by_type']
+                success_rate_by_expiration = json.loads(feedback_dict['success_rate_by_expiration']) if isinstance(feedback_dict['success_rate_by_expiration'], str) else feedback_dict['success_rate_by_expiration']
+                avg_return_by_type = json.loads(feedback_dict['avg_return_by_type']) if isinstance(feedback_dict['avg_return_by_type'], str) else feedback_dict['avg_return_by_type']
+                avg_return_by_expiration = json.loads(feedback_dict['avg_return_by_expiration']) if isinstance(feedback_dict['avg_return_by_expiration'], str) else feedback_dict['avg_return_by_expiration']
+            except (json.JSONDecodeError, KeyError):
+                success_rate_by_type = {}
+                success_rate_by_expiration = {}
+                avg_return_by_type = {}
+                avg_return_by_expiration = {}
+
+            # Format success rates by type
+            type_performance = ""
+            if success_rate_by_type:
+                for opt_type, rate in success_rate_by_type.items():
+                    avg_return = avg_return_by_type.get(opt_type, 0)
+                    type_performance += f"- {opt_type} Success Rate: {rate:.1%} | Avg Return: {avg_return:+.1%}\n"
+
+            # Format success rates by expiration
+            exp_performance = ""
+            if success_rate_by_expiration:
+                # Sort by expiration days
+                sorted_expirations = sorted(success_rate_by_expiration.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0)
+                for exp_days, rate in sorted_expirations:
+                    avg_return = avg_return_by_expiration.get(str(exp_days), 0)
+                    exp_performance += f"- {exp_days}-day Options: {rate:.1%} success | {avg_return:+.1%} avg return\n"
+
+            # Build historical context section
+            performance_context = f"""
+
+## HISTORICAL OPTIONS PERFORMANCE CONTEXT
+Based on {feedback_dict['total_predictions']} recent {ticker} options predictions:
+
+### Performance by Option Type:
+{type_performance if type_performance else "- Insufficient data for type-based analysis"}
+
+### Performance by Expiration:
+{exp_performance if exp_performance else "- Insufficient data for expiration analysis"}
+
+### Market Regime Analysis:
+{feedback_dict['market_regime_analysis']}
+
+### Key Learnings from Past Performance:
+{feedback_dict['reflection']}
+
+### Apply These Improvements to Current Analysis:
+{feedback_dict['improvements']}
+
+---
+IMPORTANT: Consider this historical context when evaluating the current option.
+Prioritize strategies that have worked well and avoid patterns that led to losses.
+"""
+            enhanced_prompt = enhanced_prompt + performance_context
+
+        conn.close()
+        return enhanced_prompt
+
     def _create_default_options_feedback(self, ticker: str, days: int) -> OptionsLLMFeedback:
         """Create default feedback when insufficient data is available"""
         return OptionsLLMFeedback(

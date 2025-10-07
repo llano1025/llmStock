@@ -228,6 +228,11 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
             db_path = Path.cwd() / 'options_predictions.db'
         self.options_tracker = OptionsTracker(db_path)
 
+        # Initialize options reflection engine for self-improving feedback loop
+        from .llmOptionsReflection import OptionsLLMReflectionEngine
+        self.options_reflection_engine = OptionsLLMReflectionEngine(llm_provider, self.options_tracker)
+        logger.info("Options reflection engine initialized for continuous learning")
+
     def _calculate_weighted_directional_bias(self, technical_indicators: Dict[str, float],
                                             sentiment_score: float) -> Tuple[str, str, float]:
         """
@@ -720,7 +725,7 @@ class OptionsAnalyzer(EnhancedStockAnalyzer):
                     candidates.append(candidate)
 
         # Sort by final risk-adjusted score and return top candidates
-        technical_candidates = sorted(candidates, key=lambda x: x.get('final_score', 0), reverse=True)[:5]
+        technical_candidates = sorted(candidates, key=lambda x: x.get('final_score', 0), reverse=True)[:10]
 
         # If we found good technical candidates, return them
         if technical_candidates:
@@ -1292,14 +1297,26 @@ Provide 2-3 recommendations in valid JSON format. Focus on options that offer th
                     option_type=candidate['option_type']
                 )
 
-                # Create analysis prompt
-                prompt = self._create_options_analysis_prompt(
+                # Create base analysis prompt
+                base_prompt = self._create_options_analysis_prompt(
                     ticker, candidate, technical_indicators, sentiment_data, greeks
                 )
 
-                # Get LLM analysis
+                # Enhance with historical options performance insights (self-improving feedback loop)
+                enhanced_prompt = base_prompt
+                if hasattr(self, 'options_reflection_engine') and self.config:
+                    try:
+                        enhanced_prompt = self.options_reflection_engine.get_enhanced_options_analysis_prompt(
+                            base_prompt, ticker, self.config
+                        )
+                        logger.debug(f"Enhanced prompt with historical options insights for {ticker}")
+                    except Exception as e:
+                        logger.warning(f"Could not enhance prompt with reflection for {ticker}: {e}")
+                        enhanced_prompt = base_prompt  # Fallback to base prompt
+
+                # Get LLM analysis with historical context
                 logger.info(f"Generating individual analysis for {ticker} {candidate['option_type']} ${candidate['strike']}")
-                analysis = self.llm.generate(prompt)
+                analysis = self.llm.generate(enhanced_prompt)
 
                 # Log the raw LLM response for debugging
                 logger.debug(f"Raw LLM analysis response for {ticker}: {analysis[:500]}...")
