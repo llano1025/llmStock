@@ -509,10 +509,6 @@ def run_options_analysis(provider_type='auto'):
         # Create runner
         runner = OptionsAnalysisRunner(analyzer, config, email_sender)
 
-        # Execute workflow
-        runner.check_open_options_predictions()
-        runner.run_weekly_options_performance_check()
-
         # Get ticker list
         ticker_list = runner.fetch_active_stocks(fetch_most_active_stocks)
 
