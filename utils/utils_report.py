@@ -942,3 +942,580 @@ class EmailSender:
 
         except Exception as e:
             print(f"Error sending options email: {str(e)}")
+
+    def send_earnings_report(self, recipient_emails, subject, analysis_results, plot_files, performance_summary):
+        """
+        Send earnings analysis email report with enhanced formatting
+
+        Args:
+            recipient_emails: str or list of str - email addresses
+            subject: str - email subject
+            analysis_results: list of dict - earnings analysis results with keys:
+                - ticker, earnings_date, days_until_earnings, current_price, prediction
+            plot_files: list of str - paths to plot files
+            performance_summary: dict - performance statistics with keys:
+                - total_predictions, success_rate, avg_pre_earnings_return,
+                  avg_post_earnings_return, avg_total_return
+        """
+        try:
+            if not analysis_results:
+                print("No analysis results to send")
+                return
+
+            # Convert single email to list
+            if isinstance(recipient_emails, str):
+                recipient_emails = [recipient_emails]
+
+            # Build HTML with matching structure to create_html_report
+            body = """
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1, h2, h3 { color: #2c3e50; }
+
+        /* Recommendation and confidence badges */
+        .recommendation {
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .BUY {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .SELL {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .HOLD {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .UP {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .DOWN {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .NEUTRAL {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .HIGH {
+            border-left: 4px solid #28a745;
+            padding-left: 10px;
+        }
+        .MEDIUM {
+            border-left: 4px solid #ffc107;
+            padding-left: 10px;
+        }
+        .LOW {
+            border-left: 4px solid #6c757d;
+            padding-left: 10px;
+        }
+
+        /* Clickable ticker links */
+        .symbol-link {
+            color: #0366d6;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .symbol-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Smooth scrolling */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Stock analysis sections */
+        .stock-analysis {
+            scroll-margin-top: 20px;
+            margin-bottom: 30px;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        /* Jump to top link */
+        .jump-to-top {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 8px 15px;
+            background-color: #e9ecef;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            color: #0366d6;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .jump-to-top:hover {
+            background-color: #dee2e6;
+            text-decoration: none;
+        }
+
+        /* Metrics display */
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .metric {
+            background-color: #ffffff;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+
+        /* Performance summary */
+        .performance-summary {
+            background-color: #ecf0f1;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border: 1px solid #bdc3c7;
+        }
+
+        /* Summary table */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+            background-color: #ffffff;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        /* Analysis text formatting */
+        .analysis-text {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #ffffff;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .earnings-date {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="top"></div>
+    <h1>Earnings Analysis Report</h1>
+    <p>Generated on: """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + """</p>
+
+    <h2>Performance Summary (Last 7 Days)</h2>
+    <div class="performance-summary">
+"""
+
+            # Add performance metrics in card format
+            if performance_summary and performance_summary.get('total_predictions', 0) > 0:
+                body += """
+        <div class="metrics">
+            <div class="metric">
+                <strong>Total Predictions:</strong> """ + str(performance_summary.get('total_predictions', 0)) + """
+            </div>
+            <div class="metric">
+                <strong>Success Rate:</strong> """ + f"{performance_summary.get('success_rate', 0)*100:.1f}%" + """
+            </div>
+            <div class="metric">
+                <strong>Avg Pre-Earnings Return:</strong> """ + f"{performance_summary.get('avg_pre_earnings_return', 0):.2f}%" + """
+            </div>
+            <div class="metric">
+                <strong>Avg Post-Earnings Return:</strong> """ + f"{performance_summary.get('avg_post_earnings_return', 0):.2f}%" + """
+            </div>
+            <div class="metric">
+                <strong>Avg Total Return:</strong> """ + f"{performance_summary.get('avg_total_return', 0):.2f}%" + """
+            </div>
+        </div>
+"""
+            else:
+                body += "<p>No recent earnings predictions to report.</p>"
+
+            body += """
+    </div>
+
+    <h2>Summary Table - Stocks with Upcoming Earnings</h2>
+    <table>
+        <tr>
+            <th>Ticker</th>
+            <th>Earnings Date</th>
+            <th>Days Until</th>
+            <th>Current Price</th>
+            <th>Pre-Earnings</th>
+            <th>Post-Earnings</th>
+            <th>Confidence</th>
+        </tr>
+"""
+
+            # Add summary table rows with clickable tickers
+            for result in analysis_results:
+                ticker = result['ticker']
+                prediction = result['prediction']
+                ticker_id = f"analysis-{ticker}"
+
+                body += f"""
+        <tr>
+            <td><a href="#{ticker_id}" class="symbol-link">{ticker}</a></td>
+            <td class="earnings-date">{result['earnings_date']}</td>
+            <td>{result['days_until_earnings']} days</td>
+            <td>${result['current_price']:.2f}</td>
+            <td><span class="recommendation {prediction.pre_earnings_recommendation}">{prediction.pre_earnings_recommendation}</span></td>
+            <td><span class="recommendation {prediction.post_earnings_direction}">{prediction.post_earnings_direction}</span></td>
+            <td><span class="recommendation {prediction.confidence}">{prediction.confidence}</span></td>
+        </tr>
+"""
+
+            body += """
+    </table>
+
+    <h2>Detailed Analysis</h2>
+"""
+
+            # Add detailed analysis sections with anchor IDs
+            for result in analysis_results:
+                ticker = result['ticker']
+                prediction = result['prediction']
+                ticker_id = f"analysis-{ticker}"
+
+                body += f"""
+    <div id="{ticker_id}" class="stock-analysis">
+        <h3>{ticker} - Earnings Analysis</h3>
+
+        <div class="metrics">
+            <div class="metric">
+                <strong>Earnings Date:</strong> <span class="earnings-date">{result['earnings_date']}</span>
+            </div>
+            <div class="metric">
+                <strong>Days Until Earnings:</strong> {result['days_until_earnings']} days
+            </div>
+            <div class="metric">
+                <strong>Current Price:</strong> ${result['current_price']:.2f}
+            </div>
+"""
+
+                if prediction.pre_earnings_target:
+                    body += f"""
+            <div class="metric">
+                <strong>Pre-Earnings Target:</strong> ${prediction.pre_earnings_target:.2f}
+            </div>
+"""
+
+                if prediction.post_earnings_target:
+                    body += f"""
+            <div class="metric">
+                <strong>Post-Earnings Target:</strong> ${prediction.post_earnings_target:.2f}
+            </div>
+"""
+
+                if prediction.stop_loss:
+                    body += f"""
+            <div class="metric">
+                <strong>Stop Loss:</strong> ${prediction.stop_loss:.2f}
+            </div>
+"""
+
+                body += f"""
+            <div class="metric {prediction.confidence}">
+                <strong>Pre-Earnings Recommendation:</strong><br>
+                <span class="recommendation {prediction.pre_earnings_recommendation}">{prediction.pre_earnings_recommendation}</span>
+            </div>
+            <div class="metric {prediction.confidence}">
+                <strong>Post-Earnings Direction:</strong><br>
+                <span class="recommendation {prediction.post_earnings_direction}">{prediction.post_earnings_direction}</span>
+            </div>
+        </div>
+"""
+
+                # Add LLM analysis if available
+                if prediction.llm_analysis:
+                    body += f"""
+        <h4>Detailed Analysis:</h4>
+        <div class="analysis-text">{prediction.llm_analysis}</div>
+"""
+
+                body += """
+        <a href="#top" class="jump-to-top">↑ Jump to Top</a>
+    </div>
+"""
+
+            body += """
+    <p><em>Disclaimer: This analysis is for informational purposes only and should not be considered as financial advice.</em></p>
+</body>
+</html>
+"""
+
+            # Create email message
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = self.sender_email
+            msg['To'] = ', '.join(recipient_emails)
+
+            # Add HTML content
+            msg.attach(MIMEText(body, 'html'))
+
+            # Add plot attachments if provided
+            if plot_files:
+                for plot_file in plot_files:
+                    if plot_file and os.path.exists(plot_file):
+                        with open(plot_file, 'rb') as f:
+                            img_data = f.read()
+
+                        img = MIMEImage(img_data)
+                        img.add_header('Content-Disposition', 'attachment', filename=os.path.basename(plot_file))
+                        msg.attach(img)
+
+            # Send email
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.sendmail(
+                    self.sender_email,
+                    recipient_emails,
+                    msg.as_string()
+                )
+            print(f"Earnings analysis email sent successfully to {', '.join(recipient_emails)}")
+
+        except Exception as e:
+            print(f"Error sending earnings email: {str(e)}")
+            raise
+
+    def send_earnings_reflection_report(self, recipient_emails, subject, reflection_text, stats, beat_miss_stats, days=90):
+        """
+        Send earnings reflection email report with performance analysis
+
+        Args:
+            recipient_emails: str or list of str - email addresses
+            subject: str - email subject
+            reflection_text: str - LLM-generated reflection analysis
+            stats: dict - performance statistics with keys:
+                - total_predictions, success_rate, avg_total_return, beat_rate
+            beat_miss_stats: DataFrame - performance breakdown by earnings outcome
+            days: int - time period analyzed (default: 90)
+        """
+        try:
+            # Convert single email to list
+            if isinstance(recipient_emails, str):
+                recipient_emails = [recipient_emails]
+
+            # Build HTML with enhanced styling
+            body = """
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1, h2, h3 { color: #2c3e50; }
+
+        /* Metrics display */
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .metric {
+            background-color: #ffffff;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+
+        /* Performance section */
+        .performance-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        /* Beat/Miss table */
+        .beat-miss-table {
+            background-color: #ffffff;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* Reflection text */
+        .reflection-text {
+            background-color: #ffffff;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Color indicators */
+        .positive { color: #28a745; font-weight: bold; }
+        .negative { color: #dc3545; font-weight: bold; }
+        .neutral { color: #6c757d; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Earnings Prediction Performance Reflection</h1>
+    <p>Generated on: """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + f"""</p>
+    <p><strong>Analysis Period:</strong> Last {days} Days</p>
+
+    <h2>Overall Statistics</h2>
+    <div class="performance-section">
+        <div class="metrics">
+            <div class="metric">
+                <strong>Total Predictions:</strong><br>
+                """ + str(stats.get('total_predictions', 0)) + """
+            </div>
+            <div class="metric">
+                <strong>Success Rate:</strong><br>
+                <span class=\"""" + ('positive' if stats.get('success_rate', 0) >= 0.6 else 'negative' if stats.get('success_rate', 0) < 0.5 else 'neutral') + """">
+                    """ + f"{stats.get('success_rate', 0)*100:.1f}%" + """
+                </span>
+            </div>
+            <div class="metric">
+                <strong>Avg Total Return:</strong><br>
+                <span class=\"""" + ('positive' if stats.get('avg_total_return', 0) > 0 else 'negative' if stats.get('avg_total_return', 0) < 0 else 'neutral') + """">
+                    """ + f"{stats.get('avg_total_return', 0):.2f}%" + """
+                </span>
+            </div>
+            <div class="metric">
+                <strong>Earnings Beat Rate:</strong><br>
+                <span class=\"""" + ('positive' if stats.get('beat_rate', 0) >= 0.5 else 'negative') + """">
+                    """ + f"{stats.get('beat_rate', 0)*100:.1f}%" + """
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <h2>Performance by Earnings Outcome</h2>
+    <div class="beat-miss-table">
+"""
+
+            # Add beat/miss statistics
+            if beat_miss_stats is not None and not beat_miss_stats.empty:
+                body += beat_miss_stats.to_string()
+            else:
+                body += "No data available"
+
+            body += """
+    </div>
+
+    <h2>LLM Reflection and Insights</h2>
+    <div class="reflection-text">""" + reflection_text + """</div>
+
+    <p><em>Disclaimer: This analysis is for informational purposes only and should not be considered as financial advice.</em></p>
+</body>
+</html>
+"""
+
+            # Create email message
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = self.sender_email
+            msg['To'] = ', '.join(recipient_emails)
+
+            # Add HTML content
+            msg.attach(MIMEText(body, 'html'))
+
+            # Send email
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.sendmail(
+                    self.sender_email,
+                    recipient_emails,
+                    msg.as_string()
+                )
+            print(f"Earnings reflection email sent successfully to {', '.join(recipient_emails)}")
+
+        except Exception as e:
+            print(f"Error sending earnings reflection email: {str(e)}")
+            raise
+
+    def send_email(self, recipient_emails, subject, body, attachments=None, is_html=True):
+        """
+        Send a generic email with optional attachments
+
+        Args:
+            recipient_emails: str or list of str - email addresses
+            subject: str - email subject
+            body: str - email body content (HTML or plain text)
+            attachments: list of str - paths to attachment files (optional)
+            is_html: bool - whether body is HTML (default: True)
+        """
+        try:
+            # Convert single email to list
+            if isinstance(recipient_emails, str):
+                recipient_emails = [recipient_emails]
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = self.sender_email
+            msg['To'] = ', '.join(recipient_emails)
+
+            # Attach body content
+            content_type = 'html' if is_html else 'plain'
+            msg.attach(MIMEText(body, content_type))
+
+            # Attach files if provided
+            if attachments:
+                for file_path in attachments:
+                    if file_path and os.path.exists(file_path):
+                        with open(file_path, 'rb') as f:
+                            img_data = f.read()
+
+                        # Try to attach as image first, otherwise as generic file
+                        if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                            img = MIMEImage(img_data)
+                        else:
+                            img = MIMEApplication(img_data)
+
+                        img.add_header('Content-Disposition', 'attachment', filename=os.path.basename(file_path))
+                        msg.attach(img)
+
+            # Send email
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.sendmail(
+                    self.sender_email,
+                    recipient_emails,
+                    msg.as_string()
+                )
+            print(f"Email sent successfully to {', '.join(recipient_emails)}")
+
+        except Exception as e:
+            print(f"Error sending email: {str(e)}")
+            raise

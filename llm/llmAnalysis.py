@@ -104,6 +104,9 @@ class Config:
     openai_api_key: str = None
     openai_host: str = None
 
+    # External API settings
+    fmp_api_key: str = None
+
     # Primary LLM provider settings
     primary_provider_type: str = None
     primary_model: str = None
@@ -185,6 +188,9 @@ class Config:
         self.openai_api_key = os.getenv('OPENAI_API_KEY', "")
         self.openai_host = os.getenv('OPENAI_HOST', "https://api.openai.com")
 
+        # External API settings
+        self.fmp_api_key = os.getenv('FMP_API_KEY', "")
+
         # Primary LLM provider settings
         self.primary_provider_type = os.getenv('PRIMARY_PROVIDER_TYPE', 'ollama')
         self.primary_model = os.getenv('PRIMARY_MODEL', "llama3.1:8b")
@@ -257,6 +263,12 @@ GEMINI_API_KEY=
 # Option 4: openai (Cloud) - Requires API key from openai
 OPENAI_API_KEY=
 OPENAI_HOST=https://api.openai.com
+
+# External API Settings
+# ====================
+# Financial Modeling Prep (FMP) - Required for earnings calendar feature
+# Get your free API key at: https://financialmodelingprep.com/developer/docs/
+FMP_API_KEY=
 
 # Consistency Control Settings
 # ============================

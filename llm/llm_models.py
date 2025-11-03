@@ -120,3 +120,66 @@ class OptionsLLMFeedback:
     reflection: str
     improvements: str
     market_regime_analysis: str
+
+
+@dataclass
+class EarningsPredictionRecord:
+    """Record of a single earnings prediction made by the system"""
+    ticker: str
+    prediction_date: str
+    earnings_date: str
+    days_until_earnings: int
+    pre_earnings_recommendation: str  # BUY/SELL/HOLD for position before earnings
+    post_earnings_direction: str  # UP/DOWN/NEUTRAL predicted after earnings
+    confidence: str  # HIGH/MEDIUM/LOW
+    entry_price: float
+    pre_earnings_target: Optional[float]  # Target before earnings
+    post_earnings_target: Optional[float]  # Target after earnings
+    stop_loss: Optional[float]
+    eps_estimate: Optional[float]
+    eps_actual: Optional[float]  # Filled after earnings
+    revenue_estimate: Optional[float]
+    revenue_actual: Optional[float]  # Filled after earnings
+    technical_indicators: Dict[str, float]
+    llm_analysis: str
+    sentiment_data: Dict[str, Any]
+    earnings_context: Dict[str, Any]  # Historical earnings performance, volatility patterns
+
+
+@dataclass
+class EarningsPerformanceRecord:
+    """Record of actual performance vs earnings prediction"""
+    prediction_id: int
+    ticker: str
+    earnings_date: str
+    outcome_date: str
+    pre_earnings_exit_price: Optional[float]  # Price just before earnings
+    post_earnings_price: float  # Price after earnings
+    pre_earnings_return: Optional[float]  # Return from entry to pre-earnings
+    post_earnings_return: float  # Return from pre-earnings to post-earnings
+    total_return: float  # Total return from entry to outcome
+    days_held_pre: Optional[int]  # Days held before earnings
+    days_held_post: int  # Days held after earnings
+    outcome: str  # SUCCESS/PARTIAL/FAILURE
+    earnings_beat_miss: str  # BEAT/MISS/INLINE
+    post_earnings_volatility: float
+    market_condition: Dict[str, float]
+
+
+@dataclass
+class EarningsLLMFeedback:
+    """Feedback from LLM reflection on earnings prediction performance"""
+    feedback_date: str
+    ticker: str
+    period_start: str
+    period_end: str
+    total_predictions: int
+    pre_earnings_success_rate: float
+    post_earnings_success_rate: float
+    avg_pre_earnings_return: float
+    avg_post_earnings_return: float
+    success_rate_by_beat_miss: Dict[str, float]  # BEAT/MISS/INLINE success rates
+    avg_return_by_beat_miss: Dict[str, float]
+    reflection: str
+    improvements: str
+    earnings_pattern_analysis: str

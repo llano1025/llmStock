@@ -40,7 +40,7 @@ if __name__ == "__main__":
     # Also handle help to avoid import errors
     if '--help' in sys.argv or '-h' in sys.argv:
         parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
-        parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
+        parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect', 'earnings', 'earnings-reflect'],
                            default='analyze', help='Operation mode')
         parser.add_argument('--list-providers', action='store_true',
                            help='List available LLM providers and exit')
@@ -285,12 +285,12 @@ def main():
 if __name__ == "__main__":
     # Parse command line arguments (special cases already handled above)
     parser = argparse.ArgumentParser(description='Stock Analysis with Prediction Tracking')
-    parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect'],
+    parser.add_argument('--mode', choices=['analyze', 'reflect', 'test', 'options', 'options-reflect', 'earnings', 'earnings-reflect'],
                        default='analyze', help='Operation mode')
     parser.add_argument('--list-providers', action='store_true',
                        help='List available LLM providers and exit')
     args = parser.parse_args()
-    
+
     if args.mode == 'analyze':
         main()
     elif args.mode == 'reflect':
@@ -329,3 +329,9 @@ if __name__ == "__main__":
         print(reflection.improvements)
         print("\nMarket Analysis:")
         print(reflection.market_regime_analysis)
+    elif args.mode == 'earnings':
+        from runner.earnings_analysis_runner import run_earnings_analysis
+        run_earnings_analysis()
+    elif args.mode == 'earnings-reflect':
+        from runner.earnings_analysis_runner import run_earnings_reflection
+        run_earnings_reflection()
