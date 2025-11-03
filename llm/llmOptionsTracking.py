@@ -14,11 +14,136 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
-from .llmTracking import PerformanceEvaluator, LLMReflectionEngine
-from .llm_models import OptionsPerformanceRecord, OptionsLLMFeedback
-from .llmOptionsAnalysis import OptionsTracker
+from .llmTracking import PredictionTracker, PerformanceEvaluator, LLMReflectionEngine
+from .llm_models import OptionsPredictionRecord, OptionsPerformanceRecord, OptionsLLMFeedback
 
 logger = logging.getLogger(__name__)
+
+
+class OptionsTracker(PredictionTracker):
+    """Extended tracker for options predictions"""
+
+    def _init_database(self):
+        """Initialize SQLite database with options tables"""
+        # Call parent initialization first
+        super()._init_database()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Create options predictions table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS options_predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                prediction_date TEXT NOT NULL,
+                option_type TEXT NOT NULL,
+                strike_price REAL NOT NULL,
+                expiration_date TEXT NOT NULL,
+                days_to_expiration INTEGER NOT NULL,
+                recommendation TEXT NOT NULL,
+                confidence TEXT NOT NULL,
+                entry_premium REAL NOT NULL,
+                target_premium REAL,
+                max_loss REAL,
+                underlying_price REAL NOT NULL,
+                implied_volatility REAL NOT NULL,
+                volume INTEGER NOT NULL,
+                open_interest INTEGER NOT NULL,
+                greeks TEXT NOT NULL,
+                technical_indicators TEXT NOT NULL,
+                llm_analysis TEXT NOT NULL,
+                sentiment_data TEXT NOT NULL,
+                status TEXT DEFAULT 'OPEN'
+            )
+        ''')
+
+        # Create options performance table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS options_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prediction_id INTEGER NOT NULL,
+                ticker TEXT NOT NULL,
+                option_type TEXT NOT NULL,
+                outcome_date TEXT NOT NULL,
+                exit_premium REAL NOT NULL,
+                actual_return REAL NOT NULL,
+                predicted_return REAL NOT NULL,
+                days_held INTEGER NOT NULL,
+                outcome TEXT NOT NULL,
+                max_profit_achieved REAL NOT NULL,
+                underlying_move REAL NOT NULL,
+                iv_change REAL NOT NULL,
+                market_condition TEXT NOT NULL,
+                FOREIGN KEY (prediction_id) REFERENCES options_predictions(id)
+            )
+        ''')
+
+        # Create options LLM feedback table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS options_llm_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feedback_date TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                total_predictions INTEGER NOT NULL,
+                success_rate_by_type TEXT NOT NULL,
+                success_rate_by_expiration TEXT NOT NULL,
+                avg_return_by_type TEXT NOT NULL,
+                avg_return_by_expiration TEXT NOT NULL,
+                reflection TEXT NOT NULL,
+                improvements TEXT NOT NULL,
+                market_regime_analysis TEXT NOT NULL
+            )
+        ''')
+
+        conn.commit()
+        conn.close()
+
+    def record_options_prediction(self, prediction: OptionsPredictionRecord) -> int:
+        """Record a new options prediction"""
+        import json
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO options_predictions (
+                ticker, prediction_date, option_type, strike_price, expiration_date,
+                days_to_expiration, recommendation, confidence, entry_premium,
+                target_premium, max_loss, underlying_price, implied_volatility,
+                volume, open_interest, greeks, technical_indicators,
+                llm_analysis, sentiment_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            prediction.ticker,
+            prediction.prediction_date,
+            prediction.option_type,
+            prediction.strike_price,
+            prediction.expiration_date,
+            prediction.days_to_expiration,
+            prediction.recommendation,
+            prediction.confidence,
+            prediction.entry_premium,
+            prediction.target_premium,
+            prediction.max_loss,
+            prediction.underlying_price,
+            prediction.implied_volatility,
+            prediction.volume,
+            prediction.open_interest,
+            json.dumps(prediction.greeks),
+            json.dumps(prediction.technical_indicators),
+            prediction.llm_analysis,
+            json.dumps(prediction.sentiment_data)
+        ))
+
+        prediction_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Recorded options prediction {prediction_id} for {prediction.ticker}")
+        return prediction_id
 
 
 class OptionsPerformanceEvaluator(PerformanceEvaluator):

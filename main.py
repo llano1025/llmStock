@@ -303,32 +303,8 @@ if __name__ == "__main__":
         from runner.options_analysis_runner import run_options_analysis
         run_options_analysis()
     elif args.mode == 'options-reflect':
-        from llm.llmOptionsReflection import OptionsLLMReflectionEngine
-        from llm.llmOptionsAnalysis import OptionsTracker
-        from utils.utils_path import get_project_root
-
-        # Initialize configuration and LLM provider
-        config = Config()
-        llm_provider = create_llm_provider(config)
-
-        # Initialize options components
-        db_path = get_project_root() / 'options_predictions.db'
-        options_tracker = OptionsTracker(db_path)
-        reflection_engine = OptionsLLMReflectionEngine(llm_provider, options_tracker)
-
-        # Generate reflection for all tickers
-        reflection = reflection_engine.generate_options_reflection('ALL', days=30)
-        print(f"\nOptions Trading Reflection ({reflection.period_start} to {reflection.period_end}):")
-        print("=" * 60)
-        print(f"Total Predictions: {reflection.total_predictions}")
-        print(f"Success Rates by Type: {reflection.success_rate_by_type}")
-        print(f"Success Rates by Expiration: {reflection.success_rate_by_expiration}")
-        print("\nReflection:")
-        print(reflection.reflection)
-        print("\nImprovements:")
-        print(reflection.improvements)
-        print("\nMarket Analysis:")
-        print(reflection.market_regime_analysis)
+        from runner.options_analysis_runner import run_options_reflection
+        run_options_reflection()
     elif args.mode == 'earnings':
         from runner.earnings_analysis_runner import run_earnings_analysis
         run_earnings_analysis()
