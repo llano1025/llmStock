@@ -452,6 +452,21 @@ class OptionsPerformanceEvaluator(PerformanceEvaluator):
 
             conn.close()
 
+            # Helper function to convert grouped stats to JSON-serializable dict
+            def grouped_df_to_dict(grouped_df):
+                """Convert MultiIndex grouped DataFrame to dict with string keys"""
+                if not isinstance(grouped_df, pd.DataFrame) or grouped_df.empty:
+                    return {}
+
+                result = {}
+                for idx in grouped_df.index:
+                    result[str(idx)] = {
+                        'actual_return_mean': float(grouped_df.loc[idx, ('actual_return', 'mean')]),
+                        'actual_return_count': int(grouped_df.loc[idx, ('actual_return', 'count')]),
+                        'success_rate': float(grouped_df.loc[idx, ('outcome', '<lambda>')])
+                    }
+                return result
+
             # Safely extract best performing metrics
             best_performing_expiration = None
             if isinstance(exp_performance, pd.DataFrame) and not exp_performance.empty:
@@ -471,9 +486,9 @@ class OptionsPerformanceEvaluator(PerformanceEvaluator):
                 'total_predictions': total_predictions,
                 'success_rate': round(success_rate, 3),
                 'average_return': round(avg_return, 3),
-                'performance_by_type': type_performance.to_dict() if isinstance(type_performance, pd.DataFrame) else {},
-                'performance_by_expiration': exp_performance.to_dict() if isinstance(exp_performance, pd.DataFrame) else {},
-                'performance_by_confidence': conf_performance.to_dict() if isinstance(conf_performance, pd.DataFrame) else {},
+                'performance_by_type': grouped_df_to_dict(type_performance),
+                'performance_by_expiration': grouped_df_to_dict(exp_performance),
+                'performance_by_confidence': grouped_df_to_dict(conf_performance),
                 'best_performing_expiration': best_performing_expiration,
                 'best_performing_type': best_performing_type
             }

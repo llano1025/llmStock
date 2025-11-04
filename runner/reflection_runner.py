@@ -4,7 +4,6 @@ Reflection and testing functions extracted from main.py.
 
 import os
 import json
-import sqlite3
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -55,16 +54,20 @@ def run_weekly_reflection(provider_type='auto'):
         tracker = PredictionTracker(db_path)
         reflection_engine = LLMReflectionEngine(llm_provider, tracker)
         
-        # Get all tickers with predictions
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT DISTINCT ticker FROM predictions WHERE status = "CLOSED"')
-        tickers = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        
+        # Get top 30 tickers with most predictions from last 90 days
+        top_tickers = tracker.get_top_tickers_by_prediction_count(limit=30, days=90, status='CLOSED')
+
+        if not top_tickers:
+            logger.info("No tickers with closed predictions found in the last 90 days")
+            return
+
+        logger.info(f"Generating reflections for top {len(top_tickers)} tickers by prediction count (last 90 days)")
+        for ticker, count in top_tickers:
+            logger.info(f"  {ticker}: {count} predictions")
+
         reflections = {}
-        for ticker in tickers:
-            logger.info(f"Generating reflection for {ticker}")
+        for ticker, count in top_tickers:
+            logger.info(f"Generating reflection for {ticker} ({count} predictions)")
             reflection = reflection_engine.generate_reflection(ticker, days=30)
             reflections[ticker] = reflection
             

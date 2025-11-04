@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import pandas as pd
 import logging
@@ -180,7 +180,7 @@ class PredictionTracker:
         conn.close()
         return analyses
         
-    def get_analysis_style_summary(self, ticker: str, days: int = 30) -> Dict[str, Any]:
+    def get_analysis_style_summary(self, ticker: str, days: int = 90) -> Dict[str, Any]:
         """Get analysis style patterns for consistency"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -217,8 +217,50 @@ class PredictionTracker:
             'style_summary': style_summary.strip()
         }
 
-    def get_performance_stats(self, ticker: Optional[str] = None, 
-                            days: int = 30) -> Dict[str, Any]:
+    def get_top_tickers_by_prediction_count(self, limit: int = 30, days: int = 90,
+                                           status: str = 'CLOSED') -> List[Tuple[str, int]]:
+        """Get top N tickers by prediction count within a time window
+
+        Args:
+            limit: Maximum number of tickers to return (default: 30)
+            days: Time window in days to count predictions (default: 90)
+            status: Filter by prediction status ('CLOSED', 'OPEN', or None for all)
+
+        Returns:
+            List of (ticker, count) tuples ordered by count descending
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        if status:
+            query = '''
+                SELECT ticker, COUNT(*) as prediction_count
+                FROM predictions
+                WHERE status = ?
+                  AND prediction_date >= datetime('now', '-{} days')
+                GROUP BY ticker
+                ORDER BY prediction_count DESC, ticker ASC
+                LIMIT ?
+            '''.format(days)
+            cursor.execute(query, (status, limit))
+        else:
+            query = '''
+                SELECT ticker, COUNT(*) as prediction_count
+                FROM predictions
+                WHERE prediction_date >= datetime('now', '-{} days')
+                GROUP BY ticker
+                ORDER BY prediction_count DESC, ticker ASC
+                LIMIT ?
+            '''.format(days)
+            cursor.execute(query, (limit,))
+
+        results = cursor.fetchall()
+        conn.close()
+
+        return results
+
+    def get_performance_stats(self, ticker: Optional[str] = None,
+                            days: int = 90) -> Dict[str, Any]:
         """Get performance statistics for predictions"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -252,21 +294,33 @@ class PredictionTracker:
             
         # Calculate statistics
         df = pd.DataFrame(results)
-        
+
+        # Helper function to convert grouped stats to JSON-serializable dict
+        def group_stats_to_dict(df, group_column):
+            """Convert grouped aggregation to dict with string keys"""
+            grouped = df.groupby(group_column).agg({
+                'actual_return': ['mean', 'std', 'count'],
+                'outcome': lambda x: (x == 'SUCCESS').mean()
+            })
+
+            result = {}
+            for idx in grouped.index:
+                result[str(idx)] = {
+                    'actual_return_mean': float(grouped.loc[idx, ('actual_return', 'mean')]),
+                    'actual_return_std': float(grouped.loc[idx, ('actual_return', 'std')]),
+                    'actual_return_count': int(grouped.loc[idx, ('actual_return', 'count')]),
+                    'success_rate': float(grouped.loc[idx, ('outcome', '<lambda>')])
+                }
+            return result
+
         stats = {
             'total_predictions': len(df),
-            'success_rate': (df['outcome'] == 'SUCCESS').mean(),
-            'avg_return': df['actual_return'].mean(),
-            'by_confidence': df.groupby('confidence').agg({
-                'actual_return': ['mean', 'std', 'count'],
-                'outcome': lambda x: (x == 'SUCCESS').mean()
-            }).to_dict(),
-            'by_recommendation': df.groupby('recommendation').agg({
-                'actual_return': ['mean', 'std', 'count'],
-                'outcome': lambda x: (x == 'SUCCESS').mean()
-            }).to_dict()
+            'success_rate': float((df['outcome'] == 'SUCCESS').mean()),
+            'avg_return': float(df['actual_return'].mean()),
+            'by_confidence': group_stats_to_dict(df, 'confidence'),
+            'by_recommendation': group_stats_to_dict(df, 'recommendation')
         }
-        
+
         return stats
 
 
@@ -394,7 +448,7 @@ class LLMReflectionEngine:
         self.llm = llm_provider
         self.tracker = tracker
         
-    def generate_reflection(self, ticker: str, days: int = 30) -> Dict[str, str]:
+    def generate_reflection(self, ticker: str, days: int = 90) -> Dict[str, str]:
         """Generate reflection on past predictions"""
         
         # Get performance statistics
